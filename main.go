@@ -52,6 +52,7 @@ func collect(lines chan<- string, addr string, minMove float64) {
 
 func collectReader(lines chan<- string, conn net.Conn, minMove float64) error {
 	var lat, lon float64
+	var date nmea.Date
 	sc := bufio.NewScanner(conn)
 	conn.SetReadDeadline(time.Now().Add(time.Minute))
 	for sc.Scan() {
@@ -65,10 +66,11 @@ func collectReader(lines chan<- string, conn net.Conn, minMove float64) error {
 		}
 		if sent.DataType() == nmea.TypeRMC {
 			rmc := sent.(nmea.RMC)
-			if distance(lat, lon, rmc.Latitude, rmc.Longitude) > minMove {
+			if rmc.Date != date || distance(lat, lon, rmc.Latitude, rmc.Longitude) > minMove {
 				lines <- line
 				lat = rmc.Latitude
 				lon = rmc.Longitude
+				date = rmc.Date
 			}
 		}
 	}
