@@ -116,10 +116,7 @@ func (i *intervalFile) reopen() error {
 	}
 
 	name := time.Now().UTC().Format(i.pattern)
-	fd, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-	if os.IsExist(err) {
-		fd, err = os.OpenFile(name+time.Now().UTC().Format("+20060102150405.000"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-	}
+	fd, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
