@@ -15,27 +15,32 @@ import (
 	"github.com/alecthomas/kingpin"
 )
 
+type record struct {
+	when time.Time
+	line string
+}
+
 func main() {
 	minMove := kingpin.Flag("min-move", "Minimum movement (m)").Default("50").Float64()
 	pattern := kingpin.Flag("pattern", "File name pattern (Go time.Format syntax)").Default("nmea-20060102.txt").String()
 	addr := kingpin.Arg("address", "NMEA TCP address").Required().String()
 	kingpin.Parse()
 
-	lines := make(chan string, 16)
+	lines := make(chan record, 16)
 	go collect(lines, *addr, *minMove)
 	write(lines, *pattern)
 }
 
-func write(lines <-chan string, pattern string) {
+func write(records <-chan record, pattern string) {
 	iw := &intervalFile{pattern: pattern}
 
 	defer iw.Close()
-	for line := range lines {
-		fmt.Fprintln(iw, line)
+	for rec := range records {
+		iw.WriteLine(rec.line, rec.when)
 	}
 }
 
-func collect(lines chan<- string, addr string, minMove float64) {
+func collect(records chan<- record, addr string, minMove float64) {
 	for {
 		conn, err := net.Dial("tcp", addr)
 		if err != nil {
@@ -43,14 +48,14 @@ func collect(lines chan<- string, addr string, minMove float64) {
 			time.Sleep(time.Minute)
 			continue
 		}
-		if err := collectReader(lines, conn, minMove); err != nil {
+		if err := collectReader(records, conn, minMove); err != nil {
 			log.Println("collect:", err)
 		}
 		conn.Close()
 	}
 }
 
-func collectReader(lines chan<- string, conn net.Conn, minMove float64) error {
+func collectReader(records chan<- record, conn net.Conn, minMove float64) error {
 	var lat, lon float64
 	var date nmea.Date
 	sc := bufio.NewScanner(conn)
@@ -67,7 +72,10 @@ func collectReader(lines chan<- string, conn net.Conn, minMove float64) error {
 		if sent.DataType() == nmea.TypeRMC {
 			rmc := sent.(nmea.RMC)
 			if rmc.Date != date || distance(lat, lon, rmc.Latitude, rmc.Longitude) > minMove {
-				lines <- line
+				records <- record{
+					when: time.Date(rmc.Date.YY, time.Month(rmc.Date.MM), rmc.Date.DD, rmc.Time.Hour, rmc.Time.Minute, rmc.Time.Second, rmc.Time.Millisecond*int(time.Millisecond), time.UTC),
+					line: line,
+				}
 				lat = rmc.Latitude
 				lon = rmc.Longitude
 				date = rmc.Date
@@ -90,16 +98,16 @@ type intervalFile struct {
 	mut     sync.Mutex
 }
 
-func (i *intervalFile) Write(data []byte) (int, error) {
+func (i *intervalFile) WriteLine(line string, when time.Time) (int, error) {
 	i.mut.Lock()
 	defer i.mut.Unlock()
 
-	if time.Now().UTC().Format(i.pattern) != i.current {
+	if when.UTC().Format(i.pattern) != i.current {
 		if err := i.reopen(); err != nil {
 			return 0, err
 		}
 	}
-	return i.fd.Write(data)
+	return fmt.Fprintf(i.fd, "%s\n", line)
 }
 
 func (i *intervalFile) Close() error {
