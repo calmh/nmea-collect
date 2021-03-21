@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -9,39 +11,69 @@ import (
 	"time"
 
 	"github.com/adrianmo/go-nmea"
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kong"
 	"github.com/kastelo/nmea-collect/gpx"
 )
 
-type record struct {
-	when time.Time
-	line string
+var cli struct {
+	MinMove float64 `help:"Minimum trackpoint move (m)" default:"15"`
+	TCPAddr string  `xor:"addr"`
+	UDPPort int     `xor:"addr"`
 }
 
 func main() {
-	minMove := kingpin.Flag("min-move", "Minimum movement (m)").Default("15").Float64()
-	addr := kingpin.Arg("address", "NMEA TCP address").Required().String()
-	kingpin.Parse()
+	log.SetFlags(0)
+	kong.Parse(&cli)
 
-	collect(*addr, *minMove)
+	if cli.TCPAddr != "" {
+		log.Println("Connecting to", cli.TCPAddr)
+		errLoop(func() error { return collectTCP(cli.TCPAddr, cli.MinMove) })
+	} else if cli.UDPPort != 0 {
+		log.Println("Listening on port", cli.UDPPort)
+		errLoop(func() error { return collectUDP(cli.UDPPort, cli.MinMove) })
+	} else {
+		log.Fatal("must set --tcp-addr or --udp-port")
+	}
 }
 
-func collect(addr string, minMove float64) {
+func errLoop(fn func() error) {
+	deadline := os.ErrDeadlineExceeded
 	for {
-		conn, err := net.Dial("tcp", addr)
-		if err != nil {
-			log.Println("collect:", err)
-			time.Sleep(time.Minute)
+		err := fn()
+		if errors.Is(err, deadline) {
+			log.Printf("No data received (%v)", err)
 			continue
 		}
-
-		log.Println("Connected to", addr)
-
-		if err := collectReader(conn, minMove); err != nil {
-			log.Println("collect:", err)
-		}
-		conn.Close()
+		log.Println("Receive error:", err)
+		time.Sleep(time.Minute)
 	}
+}
+
+func collectTCP(addr string, minMove float64) error {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("collectTCP: %w", err)
+	}
+	defer conn.Close()
+
+	if err := collectReader(conn, minMove); err != nil {
+		return fmt.Errorf("collectTCP: %w", err)
+	}
+	return nil
+}
+
+func collectUDP(port int, minMove float64) error {
+	laddr := &net.UDPAddr{Port: port}
+	conn, err := net.ListenUDP("udp", laddr)
+	if err != nil {
+		return fmt.Errorf("collectUDP: %w", err)
+	}
+	defer conn.Close()
+
+	if err := collectReader(conn, minMove); err != nil {
+		return fmt.Errorf("collectUDP: %w", err)
+	}
+	return nil
 }
 
 func collectReader(conn net.Conn, minMove float64) error {
@@ -54,10 +86,11 @@ func collectReader(conn net.Conn, minMove float64) error {
 	}
 
 	sc := bufio.NewScanner(conn)
-	conn.SetReadDeadline(time.Now().Add(time.Minute))
+	sc.Buffer(make([]byte, 0, 65536), 65536)
+	_ = conn.SetReadDeadline(time.Now().Add(time.Minute))
 	for sc.Scan() {
 		line := sc.Text()
-		conn.SetReadDeadline(time.Now().Add(time.Minute))
+		_ = conn.SetReadDeadline(time.Now().Add(time.Minute))
 
 		sent, err := nmea.Parse(line)
 		if err != nil {
@@ -72,7 +105,10 @@ func collectReader(conn net.Conn, minMove float64) error {
 			gpx.Sample(rmc.Latitude, rmc.Longitude, when)
 		}
 	}
-	return sc.Err()
+	if err := sc.Err(); err != nil {
+		return fmt.Errorf("reader: %w", err)
+	}
+	return nil
 }
 
 func newGPXFile() (io.WriteCloser, error) {
