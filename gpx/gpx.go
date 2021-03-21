@@ -1,11 +1,13 @@
 package gpx
 
 import (
+	"encoding/xml"
 	"fmt"
 	"io"
 	"log"
 	"math"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -21,25 +23,35 @@ type AutoGPX struct {
 }
 
 type sample struct {
-	lat, lon float64
-	when     time.Time
+	lat, lon   float64
+	when       time.Time
+	extensions map[string]string
 }
 
 func (s sample) gpx() string {
-	return fmt.Sprintf(`<trkpt lat="%f" lon="%f"><time>%s</time></trkpt>`, s.lat, s.lon, s.when.Format(time.RFC3339))
+	ext := ""
+	if len(s.extensions) > 0 {
+		var exts []string
+		for k, v := range s.extensions {
+			exts = append(exts, fmt.Sprintf("<nmea:%s>%s</nmea:%s>", k, v, k))
+		}
+		sort.Strings(exts)
+		ext = fmt.Sprintf("<extensions>%s</extensions>", strings.Join(exts, ""))
+	}
+	return fmt.Sprintf(`<trkpt lat="%f" lon="%f"><time>%s</time>%s</trkpt>`, s.lat, s.lon, s.when.Format(time.RFC3339), ext)
 }
 
-func (g *AutoGPX) Sample(lat, lon float64, when time.Time) {
-	s := sample{lat, lon, when}
+func (g *AutoGPX) Sample(lat, lon float64, when time.Time, extensions map[string]string) bool {
+	s := sample{lat, lon, when, extensions}
 	// If this is the first sample, keep it and return.
 	if len(g.samples) == 0 {
 		g.samples = append(g.samples, s)
-		return
+		return true
 	}
 
 	// If the latest sample is still within the sample interval, ignore this one.
 	if when.Sub(g.samples[len(g.samples)-1].when) < g.SampleInterval {
-		return
+		return false
 	}
 
 	g.samples = append(g.samples, s)
@@ -55,12 +67,12 @@ func (g *AutoGPX) Sample(lat, lon float64, when time.Time) {
 			g.startRecording()
 		}
 
-		return
+		return true
 	}
 
 	if old, ok := g.latestOlderThan(when.Add(-g.CooldownTimeWindow)); ok && distance(old, s) < g.TriggerDistanceMeters {
 		g.stopRecording()
-		return
+		return true
 	}
 
 	g.record(s)
@@ -71,6 +83,8 @@ func (g *AutoGPX) Sample(lat, lon float64, when time.Time) {
 	if keep > 0 {
 		g.samples = g.samples[keep:]
 	}
+
+	return true
 }
 
 func (g *AutoGPX) startRecording() {
@@ -133,4 +147,35 @@ func distance(s1, s2 sample) float64 {
 	d1 := math.Abs(s1.lat - s2.lat)
 	d2 := math.Abs(s1.lon - s2.lon)
 	return math.Sqrt(d1*d1+d2*d2) * 60 * 1852
+}
+
+// StringMap is a map[string]string.
+type StringMap map[string]string
+
+// StringMap marshals into XML.
+func (s StringMap) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+
+	tokens := []xml.Token{start}
+
+	for key, value := range s {
+		t := xml.StartElement{Name: xml.Name{"", key}}
+		tokens = append(tokens, t, xml.CharData(value), xml.EndElement{t.Name})
+	}
+
+	tokens = append(tokens, xml.EndElement{start.Name})
+
+	for _, t := range tokens {
+		err := e.EncodeToken(t)
+		if err != nil {
+			return err
+		}
+	}
+
+	// flush to ensure tokens are written
+	err := e.Flush()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

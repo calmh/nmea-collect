@@ -88,6 +88,7 @@ func collectReader(conn net.Conn, minMove float64) error {
 	sc := bufio.NewScanner(conn)
 	sc.Buffer(make([]byte, 0, 65536), 65536)
 	_ = conn.SetReadDeadline(time.Now().Add(time.Minute))
+	exts := make(map[string]string)
 	for sc.Scan() {
 		line := sc.Text()
 		_ = conn.SetReadDeadline(time.Now().Add(time.Minute))
@@ -99,10 +100,15 @@ func collectReader(conn net.Conn, minMove float64) error {
 		}
 
 		switch sent.DataType() {
+		case nmea.TypeDPT:
+			dpt := sent.(nmea.DPT)
+			exts["gpxx:Depth"] = fmt.Sprint(dpt.Depth)
 		case nmea.TypeRMC:
 			rmc := sent.(nmea.RMC)
 			when := time.Date(rmc.Date.YY+2000, time.Month(rmc.Date.MM), rmc.Date.DD, rmc.Time.Hour, rmc.Time.Minute, rmc.Time.Second, rmc.Time.Millisecond*int(time.Millisecond), time.UTC)
-			gpx.Sample(rmc.Latitude, rmc.Longitude, when)
+			if gpx.Sample(rmc.Latitude, rmc.Longitude, when, exts) {
+				exts = make(map[string]string)
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
