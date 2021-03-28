@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -43,15 +42,11 @@ func main() {
 }
 
 func errLoop(fn func() error) {
-	deadline := os.ErrDeadlineExceeded
 	for {
 		err := fn()
-		if errors.Is(err, deadline) {
-			log.Printf("No data received (%v)", err)
-			continue
-		}
 		log.Println("Receive error:", err)
 		time.Sleep(time.Minute)
+		log.Println("Retrying...")
 	}
 }
 
@@ -91,22 +86,11 @@ func collectReader(r io.Reader, minMove float64) error {
 		CooldownTimeWindow:    300 * time.Second,
 	}
 
-	resetDeadline := func() {}
-	if rd, ok := r.(interface {
-		SetReadDeadline(time.Time) error
-	}); ok {
-		resetDeadline = func() {
-			_ = rd.SetReadDeadline(time.Now().Add(time.Minute))
-		}
-	}
-
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 65536), 65536)
-	resetDeadline()
 	exts := make(map[string]string)
 	for sc.Scan() {
 		line := sc.Text()
-		resetDeadline()
 
 		sent, err := nmea.Parse(line)
 		if err != nil {
