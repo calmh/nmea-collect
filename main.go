@@ -113,7 +113,7 @@ func collectReader(r io.Reader, minMove float64) error {
 			if strings.Contains(err.Error(), "not supported") {
 				continue
 			}
-			log.Println("parse:", err)
+			log.Printf("parse: %q: %v", line, err)
 			continue
 		}
 
