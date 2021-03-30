@@ -7,11 +7,13 @@ import (
 const (
 	TypeMTW = "MTW"
 	TypeHDG = "HDG"
+	TypeDPT = "DPT"
 )
 
 var parsers = map[string]nmea.ParserFunc{
 	TypeMTW: parseMTW,
 	TypeHDG: parseHDG,
+	TypeDPT: parseDPT,
 }
 
 // Mean Temperature of Water
@@ -52,6 +54,22 @@ func parseHDG(s nmea.BaseSentence) (nmea.Sentence, error) {
 		DeviationDirection: p.String(2, "deviation direction"),
 		Variation:          p.Float64(3, "deviation"),
 		VariationDirection: p.String(4, "deviation direction"),
+	}
+	return m, p.Err()
+}
+
+//  Depth
+type DPT struct {
+	nmea.BaseSentence
+	Depth float64
+}
+
+func parseDPT(s nmea.BaseSentence) (nmea.Sentence, error) {
+	p := nmea.NewParser(s)
+	p.AssertType(TypeDPT)
+	m := DPT{
+		BaseSentence: s,
+		Depth:        p.Float64(0, "depth"),
 	}
 	return m, p.Err()
 }

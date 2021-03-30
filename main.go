@@ -102,8 +102,8 @@ func collectReader(r io.Reader, minMove float64) error {
 		}
 
 		switch sent.DataType() {
-		case nmea.TypeDPT:
-			dpt := sent.(nmea.DPT)
+		case TypeDPT:
+			dpt := sent.(DPT)
 			exts["gpxx:Depth"] = fmt.Sprint(dpt.Depth)
 
 		case TypeHDG:
