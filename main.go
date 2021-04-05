@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -23,6 +24,7 @@ var cli struct {
 	TCPAddr               string        `xor:"addr"`
 	UDPPort               int           `xor:"addr"`
 	Verbose               bool
+	ForwardTo             []string
 }
 
 func main() {
@@ -35,10 +37,18 @@ func main() {
 
 	if cli.TCPAddr != "" {
 		log.Println("Connecting to", cli.TCPAddr)
-		errLoop(func() error { return collectTCP() })
+		if len(cli.ForwardTo) > 0 {
+			errLoop(func() error { return collectTCP(forwardReader) })
+		} else {
+			errLoop(func() error { return collectTCP(collectReader) })
+		}
 	} else if cli.UDPPort != 0 {
 		log.Println("Listening on port", cli.UDPPort)
-		errLoop(func() error { return collectUDP() })
+		if len(cli.ForwardTo) > 0 {
+			errLoop(func() error { return collectUDP(forwardReader) })
+		} else {
+			errLoop(func() error { return collectUDP(collectReader) })
+		}
 	} else {
 		collectReader(os.Stdin)
 	}
@@ -53,20 +63,20 @@ func errLoop(fn func() error) {
 	}
 }
 
-func collectTCP() error {
+func collectTCP(fn func(io.Reader) error) error {
 	conn, err := net.Dial("tcp", cli.TCPAddr)
 	if err != nil {
 		return fmt.Errorf("collectTCP: %w", err)
 	}
 	defer conn.Close()
 
-	if err := collectReader(conn); err != nil {
+	if err := fn(conn); err != nil {
 		return fmt.Errorf("collectTCP: %w", err)
 	}
 	return nil
 }
 
-func collectUDP() error {
+func collectUDP(fn func(io.Reader) error) error {
 	laddr := &net.UDPAddr{Port: cli.UDPPort}
 	conn, err := net.ListenUDP("udp", laddr)
 	if err != nil {
@@ -74,10 +84,45 @@ func collectUDP() error {
 	}
 	defer conn.Close()
 
-	if err := collectReader(conn); err != nil {
+	if err := fn(conn); err != nil {
 		return fmt.Errorf("collectUDP: %w", err)
 	}
 	return nil
+}
+
+func forwardReader(r io.Reader) error {
+	dsts := make([]net.Conn, len(cli.ForwardTo))
+	for i, addr := range cli.ForwardTo {
+		dst, err := net.Dial("udp", addr)
+		if err != nil {
+			return err
+		}
+		dsts[i] = dst
+	}
+
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 65536), 65536)
+
+	var lastWrite time.Time
+	outBuf := new(bytes.Buffer)
+	for sc.Scan() {
+		if !strings.HasPrefix(sc.Text(), "!AI") {
+			continue
+		}
+
+		fmt.Fprintf(outBuf, "%s\r\n", sc.Text())
+		if outBuf.Len() > 1024 || time.Since(lastWrite) > time.Minute {
+			for _, dst := range dsts {
+				_, err := dst.Write(outBuf.Bytes())
+				if err != nil {
+					log.Printf("Write %v: %v", dst.RemoteAddr(), err)
+				}
+			}
+			outBuf.Reset()
+			lastWrite = time.Now()
+		}
+	}
+	return sc.Err()
 }
 
 func collectReader(r io.Reader) error {
