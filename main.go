@@ -21,10 +21,12 @@ var cli struct {
 	TriggerDistanceMeters float64       `help:"Minimum movement to start track (m)" default:"25"`
 	TriggerTimeWindow     time.Duration `help:"Time window for starting track" default:"1m"`
 	CooldownTimeWindow    time.Duration `help:"Time window before ending track" default:"5m"`
-	TCPAddr               string        `xor:"addr"`
-	UDPPort               int           `xor:"addr"`
+	TCPAddr               []string
+	UDPPort               []int
 	Verbose               bool
 	ForwardTo             []string
+	ForwardMinPacket      int `default:"1400"`
+	DedupBufferSize       int `default:"250"`
 }
 
 func main() {
@@ -35,62 +37,71 @@ func main() {
 		nmea.RegisterParser(key, parser)
 	}
 
-	if cli.TCPAddr != "" {
-		log.Println("Connecting to", cli.TCPAddr)
-		if len(cli.ForwardTo) > 0 {
-			errLoop(func() error { return collectTCP(forwardReader) })
-		} else {
-			errLoop(func() error { return collectTCP(collectReader) })
-		}
-	} else if cli.UDPPort != 0 {
-		log.Println("Listening on port", cli.UDPPort)
-		if len(cli.ForwardTo) > 0 {
-			errLoop(func() error { return collectUDP(forwardReader) })
-		} else {
-			errLoop(func() error { return collectUDP(collectReader) })
-		}
-	} else {
-		collectReader(os.Stdin)
+	c := make(chan string)
+
+	go copyInto(c, lines(os.Stdin, "stdin"))
+
+	for _, addr := range cli.TCPAddr {
+		go readTCPInto(c, addr)
 	}
+
+	for _, port := range cli.UDPPort {
+		go readUDPInto(c, port)
+	}
+
+	if len(cli.ForwardTo) > 0 {
+		a, b := tee(c)
+		c = a
+		forwardAIS(dedup(prefix(b, "!AI")))
+	}
+
+	collect(prefix(c, "$"))
+
+	select {}
 }
 
-func errLoop(fn func() error) {
+func readTCPInto(c chan<- string, addr string) {
 	for {
-		err := fn()
-		log.Println("Receive error:", err)
-		time.Sleep(time.Minute)
-		log.Println("Retrying...")
+		r, err := tcpReader(addr)
+		if err != nil {
+			log.Fatalln("TCP input:", err)
+		}
+		copyInto(c, lines(r, "tcp/"+addr))
+		time.Sleep(5 * time.Second)
 	}
 }
 
-func collectTCP(fn func(io.Reader) error) error {
-	conn, err := net.Dial("tcp", cli.TCPAddr)
+func tcpReader(addr string) (io.Reader, error) {
+	log.Println("Connecting to", addr)
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("collectTCP: %w", err)
+		return nil, fmt.Errorf("reader: %w", err)
 	}
-	defer conn.Close()
-
-	if err := fn(conn); err != nil {
-		return fmt.Errorf("collectTCP: %w", err)
-	}
-	return nil
+	return conn, nil
 }
 
-func collectUDP(fn func(io.Reader) error) error {
-	laddr := &net.UDPAddr{Port: cli.UDPPort}
+func readUDPInto(c chan<- string, port int) {
+	for {
+		r, err := udpReader(port)
+		if err != nil {
+			log.Println("UDP input:", err)
+		}
+		copyInto(c, lines(r, fmt.Sprintf("udp/%d", port)))
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func udpReader(port int) (io.Reader, error) {
+	log.Println("Listening on port", port)
+	laddr := &net.UDPAddr{Port: port}
 	conn, err := net.ListenUDP("udp", laddr)
 	if err != nil {
-		return fmt.Errorf("collectUDP: %w", err)
+		return nil, fmt.Errorf("reader: %w", err)
 	}
-	defer conn.Close()
-
-	if err := fn(conn); err != nil {
-		return fmt.Errorf("collectUDP: %w", err)
-	}
-	return nil
+	return conn, nil
 }
 
-func forwardReader(r io.Reader) error {
+func forwardAIS(c <-chan string) error {
 	dsts := make([]net.Conn, len(cli.ForwardTo))
 	for i, addr := range cli.ForwardTo {
 		dst, err := net.Dial("udp", addr)
@@ -100,32 +111,39 @@ func forwardReader(r io.Reader) error {
 		dsts[i] = dst
 	}
 
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 65536), 65536)
+	go func() {
+		var lastWrite time.Time
+		nextLog := time.Now().Truncate(time.Minute).Add(time.Minute)
+		outBuf := new(bytes.Buffer)
+		recvd, sent := 0, 0
 
-	var lastWrite time.Time
-	outBuf := new(bytes.Buffer)
-	for sc.Scan() {
-		if !strings.HasPrefix(sc.Text(), "!AI") {
-			continue
-		}
-
-		fmt.Fprintf(outBuf, "%s\r\n", sc.Text())
-		if outBuf.Len() > 1024 || time.Since(lastWrite) > time.Minute {
-			for _, dst := range dsts {
-				_, err := dst.Write(outBuf.Bytes())
-				if err != nil {
-					log.Printf("Write %v: %v", dst.RemoteAddr(), err)
+		for line := range c {
+			recvd++
+			fmt.Fprintf(outBuf, "%s\r\n", line)
+			if outBuf.Len() > cli.ForwardMinPacket || time.Since(lastWrite) > time.Minute {
+				for _, dst := range dsts {
+					_, err := dst.Write(outBuf.Bytes())
+					if err != nil {
+						log.Printf("Write %v: %v", dst.RemoteAddr(), err)
+					}
+					sent++
 				}
+				outBuf.Reset()
+				lastWrite = time.Now()
 			}
-			outBuf.Reset()
-			lastWrite = time.Now()
+
+			if time.Since(nextLog) > 0 {
+				log.Printf("forwardAIS: received %d messages, sent %d packets", recvd, sent)
+				recvd, sent = 0, 0
+				nextLog = time.Now().Truncate(time.Minute).Add(time.Minute)
+			}
 		}
-	}
-	return sc.Err()
+	}()
+
+	return nil
 }
 
-func collectReader(r io.Reader) error {
+func collect(c <-chan string) {
 	exts := make(gpx.Extensions)
 	gpx := gpx.AutoGPX{
 		Opener:                newGPXFile,
@@ -136,66 +154,180 @@ func collectReader(r io.Reader) error {
 	}
 	defer gpx.Flush()
 
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 65536), 65536)
-
-	for sc.Scan() {
-		line := sc.Text()
-
-		sent, err := nmea.Parse(line)
-		if err != nil {
-			if strings.Contains(err.Error(), "not supported") {
+	nextLog := time.Now().Truncate(time.Minute).Add(time.Minute)
+	go func() {
+		for line := range c {
+			sent, err := nmea.Parse(line)
+			if err != nil {
+				if strings.Contains(err.Error(), "not supported") {
+					continue
+				}
+				if cli.Verbose {
+					log.Printf("parse: %q: %v", line, err)
+				}
 				continue
 			}
-			log.Printf("parse: %q: %v", line, err)
-			continue
-		}
 
-		switch sent.DataType() {
-		case TypeDPT:
-			dpt := sent.(DPT)
-			exts.Set("waterdepth", fmt.Sprintf("%.01f", dpt.Depth))
+			switch sent.DataType() {
+			case TypeDPT:
+				dpt := sent.(DPT)
+				exts.Set("waterdepth", fmt.Sprintf("%.01f", dpt.Depth))
 
-		case TypeHDG:
-			hdg := sent.(HDG)
-			exts.Set("heading", fmt.Sprintf("%.0f", hdg.Heading))
+			case TypeHDG:
+				hdg := sent.(HDG)
+				exts.Set("heading", fmt.Sprintf("%.0f", hdg.Heading))
 
-		case TypeMTW:
-			mtw := sent.(MTW)
-			exts.Set("watertemp", fmt.Sprintf("%.01f", mtw.Temperature))
+			case TypeMTW:
+				mtw := sent.(MTW)
+				exts.Set("watertemp", fmt.Sprintf("%.01f", mtw.Temperature))
 
-		case TypeMWV:
-			mwv := sent.(MWV)
-			if mwv.Reference == "R" && mwv.Status == "A" {
-				exts.Set("windangle", fmt.Sprintf("%.0f", mwv.Angle))
-				exts.Set("windspeed", fmt.Sprintf("%.01f", mwv.Speed))
+			case TypeMWV:
+				mwv := sent.(MWV)
+				if mwv.Reference == "R" && mwv.Status == "A" {
+					exts.Set("windangle", fmt.Sprintf("%.0f", mwv.Angle))
+					exts.Set("windspeed", fmt.Sprintf("%.01f", mwv.Speed))
+				}
+
+			case TypeVLW:
+				mwv := sent.(VLW)
+				exts.Set("log", fmt.Sprintf("%.1f", mwv.TotalDistanceNauticalMiles))
+
+			case nmea.TypeVHW:
+				vhw := sent.(nmea.VHW)
+				exts.Set("waterspeed", fmt.Sprintf("%.01f", vhw.SpeedThroughWaterKnots))
+
+			case nmea.TypeRMC:
+				rmc := sent.(nmea.RMC)
+				when := time.Date(rmc.Date.YY+2000, time.Month(rmc.Date.MM), rmc.Date.DD, rmc.Time.Hour, rmc.Time.Minute, rmc.Time.Second, rmc.Time.Millisecond*int(time.Millisecond), time.UTC)
+				if cli.Verbose {
+					log.Println(when, rmc.Latitude, rmc.Longitude, exts)
+				}
+				gpx.Sample(rmc.Latitude, rmc.Longitude, when, exts)
 			}
 
-		case TypeVLW:
-			mwv := sent.(VLW)
-			exts.Set("log", fmt.Sprintf("%.1f", mwv.TotalDistanceNauticalMiles))
-
-		case nmea.TypeVHW:
-			vhw := sent.(nmea.VHW)
-			exts.Set("waterspeed", fmt.Sprintf("%.01f", vhw.SpeedThroughWaterKnots))
-
-		case nmea.TypeRMC:
-			rmc := sent.(nmea.RMC)
-			when := time.Date(rmc.Date.YY+2000, time.Month(rmc.Date.MM), rmc.Date.DD, rmc.Time.Hour, rmc.Time.Minute, rmc.Time.Second, rmc.Time.Millisecond*int(time.Millisecond), time.UTC)
-			if cli.Verbose {
-				log.Println(when, rmc.Latitude, rmc.Longitude, exts)
+			if time.Since(nextLog) > 0 {
+				log.Printf("collect: %s", exts)
+				nextLog = time.Now().Truncate(time.Minute).Add(time.Minute)
 			}
-			gpx.Sample(rmc.Latitude, rmc.Longitude, when, exts)
 		}
-	}
-	if err := sc.Err(); err != nil {
-		return fmt.Errorf("reader: %w", err)
-	}
-	return nil
+	}()
 }
 
 func newGPXFile() (io.WriteCloser, error) {
 	name := time.Now().UTC().Format("track-20060102-150405.gpx")
 	log.Println("Creating new GPX track", name)
 	return os.Create(name)
+}
+
+type deduper []string
+
+func (d deduper) Check(s string) bool {
+	for _, c := range d {
+		if c == s {
+			return false
+		}
+	}
+	copy(d[1:], d)
+	d[0] = s
+	return true
+}
+
+func dedup(c <-chan string) chan string {
+	dedup := make(deduper, cli.DedupBufferSize)
+	res := make(chan string)
+	recv, dup := 0, 0
+	nextLog := time.Now().Truncate(time.Minute).Add(time.Minute)
+	go func() {
+		defer close(res)
+		for line := range c {
+			recv++
+			if dedup.Check(line) {
+				res <- line
+			} else {
+				dup++
+			}
+			if cli.Verbose && time.Since(nextLog) > 0 {
+				log.Printf("dedup: received %d messages (%d duplicates)", recv, dup)
+				recv, dup = 0, 0
+				nextLog = time.Now().Truncate(time.Minute).Add(time.Minute)
+			}
+		}
+	}()
+	return res
+}
+
+func prefix(c <-chan string, prefix string) <-chan string {
+	res := make(chan string)
+	go func() {
+		defer close(res)
+		for s := range c {
+			if strings.HasPrefix(s, prefix) {
+				res <- s
+			}
+		}
+	}()
+	return res
+}
+
+func lines(r io.Reader, name string) <-chan string {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 65536), 65536)
+
+	res := make(chan string)
+	recv, badPrefix, noChecksum, badChecksum := 0, 0, 0, 0
+	nextLog := time.Now().Truncate(time.Minute).Add(time.Minute)
+	go func() {
+		defer close(res)
+		for sc.Scan() {
+			if cli.Verbose && time.Since(nextLog) > 0 {
+				log.Printf("%s: received %d messages (skipped %d bad prefix, %d missing checksum, %d bad checksum)", name, recv, badPrefix, noChecksum, badChecksum)
+				recv, badPrefix, noChecksum, badChecksum = 0, 0, 0, 0
+				nextLog = time.Now().Truncate(time.Minute).Add(time.Minute)
+			}
+
+			line := sc.Text()
+			recv++
+			if line == "" {
+				badPrefix++
+				continue
+			}
+			switch line[0] {
+			case '!', '$':
+				idx := strings.LastIndexByte(line, '*')
+				if idx == -1 {
+					noChecksum++
+					continue
+				}
+				chk := nmea.Checksum(line[1:idx])
+				if chk != line[idx+1:] {
+					badChecksum++
+					continue
+				}
+				res <- line
+			default:
+				badPrefix++
+			}
+		}
+	}()
+	return res
+}
+
+func copyInto(dst chan<- string, src <-chan string) {
+	for s := range src {
+		dst <- s
+	}
+}
+
+func tee(c <-chan string) (chan string, chan string) {
+	a := make(chan string)
+	b := make(chan string)
+	go func() {
+		defer close(a)
+		defer close(b)
+		for s := range c {
+			a <- s
+			b <- s
+		}
+	}()
+	return a, b
 }

@@ -181,3 +181,15 @@ func (x Extensions) XML() string {
 	sort.Strings(exts)
 	return strings.Join(exts, "")
 }
+
+func (x Extensions) String() string {
+	var exts []string
+	for k, v := range x {
+		if time.Since(v.When) > time.Minute {
+			continue
+		}
+		exts = append(exts, fmt.Sprintf("%s: %s", k, v.Value))
+	}
+	sort.Strings(exts)
+	return strings.Join(exts, ", ")
+}
