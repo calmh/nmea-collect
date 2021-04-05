@@ -16,10 +16,13 @@ import (
 )
 
 var cli struct {
-	MinMove float64 `help:"Minimum trackpoint move (m)" default:"15"`
-	TCPAddr string  `xor:"addr"`
-	UDPPort int     `xor:"addr"`
-	Verbose bool
+	SampleInterval        time.Duration `help:"Time between recorded track points" default:"30s"`
+	TriggerDistanceMeters float64       `help:"Minimum movement to start track (m)" default:"25"`
+	TriggerTimeWindow     time.Duration `help:"Time window for starting track" default:"1m"`
+	CooldownTimeWindow    time.Duration `help:"Time window before ending track" default:"5m"`
+	TCPAddr               string        `xor:"addr"`
+	UDPPort               int           `xor:"addr"`
+	Verbose               bool
 }
 
 func main() {
@@ -32,12 +35,12 @@ func main() {
 
 	if cli.TCPAddr != "" {
 		log.Println("Connecting to", cli.TCPAddr)
-		errLoop(func() error { return collectTCP(cli.TCPAddr, cli.MinMove) })
+		errLoop(func() error { return collectTCP() })
 	} else if cli.UDPPort != 0 {
 		log.Println("Listening on port", cli.UDPPort)
-		errLoop(func() error { return collectUDP(cli.UDPPort, cli.MinMove) })
+		errLoop(func() error { return collectUDP() })
 	} else {
-		collectReader(os.Stdin, cli.MinMove)
+		collectReader(os.Stdin)
 	}
 }
 
@@ -50,45 +53,47 @@ func errLoop(fn func() error) {
 	}
 }
 
-func collectTCP(addr string, minMove float64) error {
-	conn, err := net.Dial("tcp", addr)
+func collectTCP() error {
+	conn, err := net.Dial("tcp", cli.TCPAddr)
 	if err != nil {
 		return fmt.Errorf("collectTCP: %w", err)
 	}
 	defer conn.Close()
 
-	if err := collectReader(conn, minMove); err != nil {
+	if err := collectReader(conn); err != nil {
 		return fmt.Errorf("collectTCP: %w", err)
 	}
 	return nil
 }
 
-func collectUDP(port int, minMove float64) error {
-	laddr := &net.UDPAddr{Port: port}
+func collectUDP() error {
+	laddr := &net.UDPAddr{Port: cli.UDPPort}
 	conn, err := net.ListenUDP("udp", laddr)
 	if err != nil {
 		return fmt.Errorf("collectUDP: %w", err)
 	}
 	defer conn.Close()
 
-	if err := collectReader(conn, minMove); err != nil {
+	if err := collectReader(conn); err != nil {
 		return fmt.Errorf("collectUDP: %w", err)
 	}
 	return nil
 }
 
-func collectReader(r io.Reader, minMove float64) error {
+func collectReader(r io.Reader) error {
+	exts := make(gpx.Extensions)
 	gpx := gpx.AutoGPX{
 		Opener:                newGPXFile,
-		SampleInterval:        10 * time.Second,
-		TriggerDistanceMeters: minMove,
-		TriggerTimeWindow:     60 * time.Second,
-		CooldownTimeWindow:    300 * time.Second,
+		SampleInterval:        cli.SampleInterval,
+		TriggerDistanceMeters: cli.TriggerDistanceMeters,
+		TriggerTimeWindow:     cli.TriggerTimeWindow,
+		CooldownTimeWindow:    cli.CooldownTimeWindow,
 	}
+	defer gpx.Flush()
 
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 65536), 65536)
-	exts := make(map[string]string)
+
 	for sc.Scan() {
 		line := sc.Text()
 
@@ -104,15 +109,30 @@ func collectReader(r io.Reader, minMove float64) error {
 		switch sent.DataType() {
 		case TypeDPT:
 			dpt := sent.(DPT)
-			exts["gpxx:Depth"] = fmt.Sprint(dpt.Depth)
+			exts.Set("waterdepth", fmt.Sprintf("%.01f", dpt.Depth))
 
 		case TypeHDG:
 			hdg := sent.(HDG)
-			exts["gpxx:Heading"] = fmt.Sprint(hdg.Heading)
+			exts.Set("heading", fmt.Sprintf("%.0f", hdg.Heading))
 
 		case TypeMTW:
 			mtw := sent.(MTW)
-			exts["gpxx:Temperature"] = fmt.Sprint(mtw.Temperature)
+			exts.Set("watertemp", fmt.Sprintf("%.01f", mtw.Temperature))
+
+		case TypeMWV:
+			mwv := sent.(MWV)
+			if mwv.Reference == "R" && mwv.Status == "A" {
+				exts.Set("windangle", fmt.Sprintf("%.0f", mwv.Angle))
+				exts.Set("windspeed", fmt.Sprintf("%.01f", mwv.Speed))
+			}
+
+		case TypeVLW:
+			mwv := sent.(VLW)
+			exts.Set("log", fmt.Sprintf("%.1f", mwv.TotalDistanceNauticalMiles))
+
+		case nmea.TypeVHW:
+			vhw := sent.(nmea.VHW)
+			exts.Set("waterspeed", fmt.Sprintf("%.01f", vhw.SpeedThroughWaterKnots))
 
 		case nmea.TypeRMC:
 			rmc := sent.(nmea.RMC)
@@ -120,9 +140,7 @@ func collectReader(r io.Reader, minMove float64) error {
 			if cli.Verbose {
 				log.Println(when, rmc.Latitude, rmc.Longitude, exts)
 			}
-			if gpx.Sample(rmc.Latitude, rmc.Longitude, when, exts) {
-				exts = make(map[string]string)
-			}
+			gpx.Sample(rmc.Latitude, rmc.Longitude, when, exts)
 		}
 	}
 	if err := sc.Err(); err != nil {

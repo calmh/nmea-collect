@@ -5,15 +5,19 @@ import (
 )
 
 const (
-	TypeMTW = "MTW"
-	TypeHDG = "HDG"
 	TypeDPT = "DPT"
+	TypeHDG = "HDG"
+	TypeMTW = "MTW"
+	TypeMWV = "MWV"
+	TypeVLW = "VLW"
 )
 
 var parsers = map[string]nmea.ParserFunc{
-	TypeMTW: parseMTW,
-	TypeHDG: parseHDG,
 	TypeDPT: parseDPT,
+	TypeHDG: parseHDG,
+	TypeMTW: parseMTW,
+	TypeMWV: parseMWV,
+	TypeVLW: parseVLW,
 }
 
 // Mean Temperature of Water
@@ -70,6 +74,51 @@ func parseDPT(s nmea.BaseSentence) (nmea.Sentence, error) {
 	m := DPT{
 		BaseSentence: s,
 		Depth:        p.Float64(0, "depth"),
+	}
+	return m, p.Err()
+}
+
+//  Wind speed and angle
+type MWV struct {
+	nmea.BaseSentence
+	Angle     float64
+	Reference string
+	Speed     float64
+	SpeedUnit string
+	Status    string
+}
+
+func parseMWV(s nmea.BaseSentence) (nmea.Sentence, error) {
+	p := nmea.NewParser(s)
+	p.AssertType(TypeMWV)
+	m := MWV{
+		BaseSentence: s,
+		Angle:        p.Float64(0, "angle"),
+		Reference:    p.String(1, "reference"),
+		Speed:        p.Float64(2, "speed"),
+		SpeedUnit:    p.String(3, "unit"),
+		Status:       p.String(4, "status"),
+	}
+	if m.Angle > 180 {
+		m.Angle = -(360 - m.Angle)
+	}
+	return m, p.Err()
+}
+
+//  Distance through water
+type VLW struct {
+	nmea.BaseSentence
+	TotalDistanceNauticalMiles      float64
+	DistancesinceResetNauticalMiles float64
+}
+
+func parseVLW(s nmea.BaseSentence) (nmea.Sentence, error) {
+	p := nmea.NewParser(s)
+	p.AssertType(TypeVLW)
+	m := VLW{
+		BaseSentence:                    s,
+		TotalDistanceNauticalMiles:      p.Float64(0, "total distance"),
+		DistancesinceResetNauticalMiles: p.Float64(2, "distance since reset"),
 	}
 	return m, p.Err()
 }

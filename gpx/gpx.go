@@ -1,7 +1,6 @@
 package gpx
 
 import (
-	"encoding/xml"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +8,11 @@ import (
 	"sort"
 	"strings"
 	"time"
+)
+
+const (
+	Namespace    = "nmc"
+	NamespaceURL = "https://github.com/calmh/nmea-collect/"
 )
 
 type AutoGPX struct {
@@ -25,23 +29,18 @@ type AutoGPX struct {
 type sample struct {
 	lat, lon   float64
 	when       time.Time
-	extensions map[string]string
+	extensions Extensions
 }
 
 func (s sample) gpx() string {
 	ext := ""
 	if len(s.extensions) > 0 {
-		var exts []string
-		for k, v := range s.extensions {
-			exts = append(exts, fmt.Sprintf("<nmea:%s>%s</nmea:%s>", k, v, k))
-		}
-		sort.Strings(exts)
-		ext = fmt.Sprintf("<extensions>%s</extensions>", strings.Join(exts, ""))
+		ext = fmt.Sprintf("<extensions>%s</extensions>", s.extensions.XML())
 	}
 	return fmt.Sprintf(`<trkpt lat="%f" lon="%f"><time>%s</time>%s</trkpt>`, s.lat, s.lon, s.when.Format(time.RFC3339), ext)
 }
 
-func (g *AutoGPX) Sample(lat, lon float64, when time.Time, extensions map[string]string) bool {
+func (g *AutoGPX) Sample(lat, lon float64, when time.Time, extensions Extensions) bool {
 	s := sample{lat, lon, when, extensions}
 	// If this is the first sample, keep it and return.
 	if len(g.samples) == 0 {
@@ -87,6 +86,14 @@ func (g *AutoGPX) Sample(lat, lon float64, when time.Time, extensions map[string
 	return true
 }
 
+func (g *AutoGPX) Flush() error {
+	if g.destination == nil {
+		return nil
+	}
+	g.stopRecording()
+	return nil
+}
+
 func (g *AutoGPX) startRecording() {
 	fd, err := g.Opener()
 	if err != nil {
@@ -95,7 +102,7 @@ func (g *AutoGPX) startRecording() {
 	}
 	g.destination = fd
 
-	header := `<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>`
+	header := fmt.Sprintf(`<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:%s="%s"><trk><trkseg>`, Namespace, NamespaceURL)
 	if _, err := fmt.Fprintln(g.destination, header); err != nil {
 		log.Println("Writing to file:", err)
 		return
@@ -149,33 +156,28 @@ func distance(s1, s2 sample) float64 {
 	return math.Sqrt(d1*d1+d2*d2) * 60 * 1852
 }
 
-// StringMap is a map[string]string.
-type StringMap map[string]string
+type Extensions map[string]extensionValue
 
-// StringMap marshals into XML.
-func (s StringMap) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+type extensionValue struct {
+	Value string
+	When  time.Time
+}
 
-	tokens := []xml.Token{start}
-
-	for key, value := range s {
-		t := xml.StartElement{Name: xml.Name{"", key}}
-		tokens = append(tokens, t, xml.CharData(value), xml.EndElement{t.Name})
+func (x Extensions) Set(key, val string) {
+	x[key] = extensionValue{
+		Value: val,
+		When:  time.Now(),
 	}
+}
 
-	tokens = append(tokens, xml.EndElement{start.Name})
-
-	for _, t := range tokens {
-		err := e.EncodeToken(t)
-		if err != nil {
-			return err
+func (x Extensions) XML() string {
+	var exts []string
+	for k, v := range x {
+		if time.Since(v.When) > time.Minute {
+			continue
 		}
+		exts = append(exts, fmt.Sprintf("<%s:%s>%s</%s:%s>", Namespace, k, v.Value, Namespace, k))
 	}
-
-	// flush to ensure tokens are written
-	err := e.Flush()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	sort.Strings(exts)
+	return strings.Join(exts, "")
 }
