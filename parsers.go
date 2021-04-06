@@ -1,6 +1,7 @@
 package main
 
 import (
+	ais "github.com/BertoldVdb/go-ais"
 	"github.com/adrianmo/go-nmea"
 )
 
@@ -121,4 +122,36 @@ func parseVLW(s nmea.BaseSentence) (nmea.Sentence, error) {
 		DistancesinceResetNauticalMiles: p.Float64(2, "distance since reset"),
 	}
 	return m, p.Err()
+}
+
+//
+
+var dec = ais.CodecNew(false, false)
+
+func parseAIS(line string) (*ais.Header, bool) {
+	sentence, err := nmea.Parse(line)
+	if err != nil {
+		return nil, false
+	}
+
+	vdmvdo, ok := sentence.(nmea.VDMVDO)
+	if !ok {
+		return nil, false
+	}
+	if vdmvdo.NumFragments > 1 {
+		return nil, false
+	}
+
+	pkt := dec.DecodePacket(vdmvdo.Payload)
+	if pkt == nil {
+		return nil, false
+	}
+
+	hdr := pkt.GetHeader()
+	switch hdr.MessageID {
+	case 1, 2, 3, 4, 18, 21:
+		return hdr, true
+	default:
+		return nil, false
+	}
 }

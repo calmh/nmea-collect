@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adrianmo/go-nmea"
+	"github.com/BertoldVdb/go-ais"
+	nmea "github.com/adrianmo/go-nmea"
 	"github.com/alecthomas/kong"
 	"github.com/kastelo/nmea-collect/gpx"
 )
@@ -25,8 +26,9 @@ var cli struct {
 	UDPPort               []int
 	Verbose               bool
 	ForwardTo             []string
-	ForwardMinPacket      int `default:"1400"`
-	DedupBufferSize       int `default:"250"`
+	ForwardMinPacket      int           `default:"1400"`
+	DedupBufferSize       int           `default:"250"`
+	AISDedupTime          time.Duration `default:"5m"`
 }
 
 func main() {
@@ -111,14 +113,26 @@ func forwardAIS(c <-chan string) error {
 		dsts[i] = dst
 	}
 
+	dedup := make(map[ais.Header]time.Time)
+
 	go func() {
 		var lastWrite time.Time
 		nextLog := time.Now().Truncate(time.Minute).Add(time.Minute)
 		outBuf := new(bytes.Buffer)
-		recvd, sent := 0, 0
+		recvd, sent, skip := 0, 0, 0
 
 		for line := range c {
 			recvd++
+
+			messageID, ok := parseAIS(line)
+			if ok {
+				if seen := dedup[*messageID]; time.Since(seen) < cli.AISDedupTime {
+					skip++
+					continue
+				}
+				dedup[*messageID] = time.Now()
+			}
+
 			fmt.Fprintf(outBuf, "%s\r\n", line)
 			if outBuf.Len() > cli.ForwardMinPacket || time.Since(lastWrite) > time.Minute {
 				for _, dst := range dsts {
@@ -133,9 +147,16 @@ func forwardAIS(c <-chan string) error {
 			}
 
 			if time.Since(nextLog) > 0 {
-				log.Printf("forwardAIS: received %d messages, sent %d packets", recvd, sent)
-				recvd, sent = 0, 0
+				log.Printf("forwardAIS: received %d messages, skipped %d, sent %d packets", recvd, skip, sent)
+				recvd, sent, skip = 0, 0, 0
 				nextLog = time.Now().Truncate(time.Minute).Add(time.Minute)
+
+				cutoff := time.Now().Add(-cli.AISDedupTime)
+				for id, seen := range dedup {
+					if seen.Before(cutoff) {
+						delete(dedup, id)
+					}
+				}
 			}
 		}
 	}()
