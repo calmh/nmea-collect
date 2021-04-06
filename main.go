@@ -26,9 +26,9 @@ var cli struct {
 	UDPPort               []int
 	Verbose               bool
 	ForwardTo             []string
-	ForwardMinPacket      int           `default:"1400"`
-	DedupBufferSize       int           `default:"250"`
-	AISDedupTime          time.Duration `default:"5m"`
+	ForwardMinPacket      int `default:"1400"`
+	DedupBufferSize       int
+	AISDedupTime          time.Duration
 }
 
 func main() {
@@ -54,7 +54,11 @@ func main() {
 	if len(cli.ForwardTo) > 0 {
 		a, b := tee(c)
 		c = a
-		forwardAIS(dedup(prefix(b, "!AI")))
+		ais := prefix(b, "!AI")
+		if cli.DedupBufferSize > 0 {
+			ais = dedup(ais)
+		}
+		forwardAIS(ais)
 	}
 
 	collect(prefix(c, "$"))
@@ -114,7 +118,6 @@ func forwardAIS(c <-chan string) error {
 	}
 
 	dedup := make(map[ais.Header]time.Time)
-
 	go func() {
 		var lastWrite time.Time
 		nextLog := time.Now().Truncate(time.Minute).Add(time.Minute)
@@ -124,13 +127,15 @@ func forwardAIS(c <-chan string) error {
 		for line := range c {
 			recvd++
 
-			messageID, ok := parseAIS(line)
-			if ok {
-				if seen := dedup[*messageID]; time.Since(seen) < cli.AISDedupTime {
-					skip++
-					continue
+			if cli.AISDedupTime > 0 {
+				messageID, ok := parseAIS(line)
+				if ok {
+					if seen := dedup[*messageID]; time.Since(seen) < cli.AISDedupTime {
+						skip++
+						continue
+					}
+					dedup[*messageID] = time.Now()
 				}
-				dedup[*messageID] = time.Now()
 			}
 
 			fmt.Fprintf(outBuf, "%s\r\n", line)
@@ -151,10 +156,12 @@ func forwardAIS(c <-chan string) error {
 				recvd, sent, skip = 0, 0, 0
 				nextLog = time.Now().Truncate(time.Minute).Add(time.Minute)
 
-				cutoff := time.Now().Add(-cli.AISDedupTime)
-				for id, seen := range dedup {
-					if seen.Before(cutoff) {
-						delete(dedup, id)
+				if cli.AISDedupTime > 0 {
+					cutoff := time.Now().Add(-cli.AISDedupTime)
+					for id, seen := range dedup {
+						if seen.Before(cutoff) {
+							delete(dedup, id)
+						}
 					}
 				}
 			}
