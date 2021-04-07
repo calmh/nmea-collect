@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BertoldVdb/go-ais"
@@ -25,10 +26,12 @@ var cli struct {
 	TCPAddr               []string
 	UDPPort               []int
 	Verbose               bool
-	ForwardTo             []string
-	ForwardMinPacket      int `default:"1400"`
+	ForwardAISUDP         []string `name:"forward-ais-udp"`
+	ForwardMinPacket      int      `default:"1400"`
 	DedupBufferSize       int
 	AISDedupTime          time.Duration
+	ListenAllTCP          string `default:":2000"`
+	ListenAISTCP          string `default:":2010" name:"listen-ais-tcp"`
 }
 
 func main() {
@@ -51,7 +54,13 @@ func main() {
 		go readUDPInto(c, port)
 	}
 
-	if len(cli.ForwardTo) > 0 {
+	if cli.ListenAllTCP != "" {
+		a, b := tee(c)
+		c = a
+		forwardTCP(b, cli.ListenAllTCP)
+	}
+
+	if len(cli.ForwardAISUDP) > 0 {
 		a, b := tee(c)
 		c = a
 		ais := prefix(b, "!AI")
@@ -59,6 +68,13 @@ func main() {
 			ais = dedup(ais)
 		}
 		forwardAIS(ais)
+	}
+
+	if cli.ListenAISTCP != "" {
+		a, b := tee(c)
+		c = a
+		ais := prefix(b, "!AI")
+		forwardTCP(ais, cli.ListenAISTCP)
 	}
 
 	collect(prefix(c, "$"))
@@ -98,7 +114,7 @@ func readUDPInto(c chan<- string, port int) {
 }
 
 func udpReader(port int) (io.Reader, error) {
-	log.Println("Listening on port", port)
+	log.Println("Listening for UDP on port", port)
 	laddr := &net.UDPAddr{Port: port}
 	conn, err := net.ListenUDP("udp", laddr)
 	if err != nil {
@@ -108,12 +124,13 @@ func udpReader(port int) (io.Reader, error) {
 }
 
 func forwardAIS(c <-chan string) error {
-	dsts := make([]net.Conn, len(cli.ForwardTo))
-	for i, addr := range cli.ForwardTo {
+	dsts := make([]net.Conn, len(cli.ForwardAISUDP))
+	for i, addr := range cli.ForwardAISUDP {
 		dst, err := net.Dial("udp", addr)
 		if err != nil {
 			return err
 		}
+		log.Println("Forwarding AIS to udp/" + addr)
 		dsts[i] = dst
 	}
 
@@ -358,4 +375,57 @@ func tee(c <-chan string) (chan string, chan string) {
 		}
 	}()
 	return a, b
+}
+
+type tcpForwarder struct {
+	input <-chan string
+	conns []net.Conn
+	mut   sync.Mutex
+}
+
+func forwardTCP(input <-chan string, addr string) {
+	f := &tcpForwarder{
+		input: input,
+	}
+	go f.run()
+	go f.listen(addr)
+}
+
+func (f *tcpForwarder) run() {
+	for line := range f.input {
+		f.mut.Lock()
+		for i := 0; i < len(f.conns); i++ {
+			f.conns[i].SetWriteDeadline(time.Now().Add(time.Second))
+			if _, err := fmt.Fprintf(f.conns[i], "%s\n", line); err != nil {
+				log.Println("Dropping connection from", f.conns[i].RemoteAddr(), "due to", err)
+				f.conns[i].Close()
+				f.conns = append(f.conns[:i], f.conns[i+1:]...)
+				i--
+			}
+		}
+		f.mut.Unlock()
+	}
+}
+
+func (f *tcpForwarder) listen(addr string) {
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Println("Listen:", err)
+		return
+	}
+	defer l.Close()
+	log.Println("Listening on", l.Addr())
+
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			log.Println("Accept:", err)
+			return
+		}
+
+		log.Println("Incoming connection from", conn.RemoteAddr(), "to", l.Addr())
+		f.mut.Lock()
+		f.conns = append(f.conns, conn)
+		f.mut.Unlock()
+	}
 }
