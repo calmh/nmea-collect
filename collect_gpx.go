@@ -2,28 +2,25 @@ package main
 
 import (
 	"fmt"
-	"io"
-	"log"
-	"os"
 	"strings"
 	"time"
 
 	nmea "github.com/adrianmo/go-nmea"
-	"github.com/kastelo/nmea-collect/gpx"
+	"github.com/calmh/nmea-collect/gpx"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var (
-	gpxPositionsTotal = promauto.NewCounter(prometheus.CounterOpts{
+	gpxPositionsSampled = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "nmea",
 		Subsystem: "gpx",
 		Name:      "sampled_positions_total",
 	})
-	gpxFilesCreatedTotal = promauto.NewCounter(prometheus.CounterOpts{
+	gpxPositionsRecorded = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "nmea",
 		Subsystem: "gpx",
-		Name:      "files_created_total",
+		Name:      "record_positions_total",
 	})
 	gpxInputMessages = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "nmea",
@@ -42,16 +39,9 @@ var (
 	})
 )
 
-func collect(c <-chan string) {
+func collectGPX(c <-chan string, w *gpx.AutoGPX) {
 	exts := make(gpx.Extensions)
-	gpx := gpx.AutoGPX{
-		Opener:                newGPXFile,
-		SampleInterval:        cli.SampleInterval,
-		TriggerDistanceMeters: cli.TriggerDistanceMeters,
-		TriggerTimeWindow:     cli.TriggerTimeWindow,
-		CooldownTimeWindow:    cli.CooldownTimeWindow,
-	}
-	defer gpx.Flush()
+	defer w.Flush()
 
 	for line := range c {
 		gpxInputMessages.Inc()
@@ -62,9 +52,6 @@ func collect(c <-chan string) {
 				continue
 			}
 			gpxBadMessages.Inc()
-			if cli.Verbose {
-				log.Printf("parse: %q: %v", line, err)
-			}
 			continue
 		}
 
@@ -97,17 +84,20 @@ func collect(c <-chan string) {
 			exts.Set("waterspeed", fmt.Sprintf("%.01f", vhw.SpeedThroughWaterKnots))
 
 		case nmea.TypeGLL:
-			rmc := sent.(nmea.GLL)
+			gll := sent.(nmea.GLL)
 			when := time.Now()
-			gpx.Sample(rmc.Latitude, rmc.Longitude, when, exts)
-			gpxPositionsTotal.Inc()
+			if w.Sample(gll.Latitude, gll.Longitude, when, exts) {
+				gpxPositionsRecorded.Inc()
+			}
+			gpxPositionsSampled.Inc()
+
+		case nmea.TypeRMC:
+			rmc := sent.(nmea.RMC)
+			when := time.Now()
+			if w.Sample(rmc.Latitude, rmc.Longitude, when, exts) {
+				gpxPositionsRecorded.Inc()
+			}
+			gpxPositionsSampled.Inc()
 		}
 	}
-}
-
-func newGPXFile() (io.WriteCloser, error) {
-	name := time.Now().UTC().Format("track-20060102-150405.gpx")
-	log.Println("Creating new GPX track", name)
-	gpxFilesCreatedTotal.Inc()
-	return os.Create(name)
 }

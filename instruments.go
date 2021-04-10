@@ -1,9 +1,6 @@
 package main
 
 import (
-	"log"
-	"strings"
-
 	nmea "github.com/adrianmo/go-nmea"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -56,12 +53,6 @@ func exposeMetrics(c <-chan string) {
 	for line := range c {
 		sent, err := nmea.Parse(line)
 		if err != nil {
-			if strings.Contains(err.Error(), "not supported") {
-				continue
-			}
-			if cli.Verbose {
-				log.Printf("parse: %q: %v", line, err)
-			}
 			continue
 		}
 

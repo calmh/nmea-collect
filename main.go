@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -8,24 +9,27 @@ import (
 
 	nmea "github.com/adrianmo/go-nmea"
 	"github.com/alecthomas/kong"
+	"github.com/calmh/nmea-collect/gpx"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var cli struct {
-	SampleInterval        time.Duration `help:"Time between recorded track points" default:"30s"`
-	TriggerDistanceMeters float64       `help:"Minimum movement to start track (m)" default:"25"`
-	TriggerTimeWindow     time.Duration `help:"Time window for starting track" default:"1m"`
-	CooldownTimeWindow    time.Duration `help:"Time window before ending track" default:"5m"`
-	TCPAddr               []string
-	UDPPort               []int
-	Verbose               bool
-	ForwardAISUDP         []string `name:"forward-ais-udp"`
-	ListenAllTCP          string   `default:":2000"`
-	ListenAISTCP          string   `default:":2010" name:"listen-ais-tcp"`
-	ListenPrometheus      string   `default:":9140"`
-}
-
 func main() {
+	var cli struct {
+		SampleInterval        time.Duration `help:"Time between recorded track points" default:"10s"`
+		TriggerDistanceMeters float64       `help:"Minimum movement to start track (m)" default:"25"`
+		TriggerTimeWindow     time.Duration `help:"Time window for starting track" default:"1m"`
+		CooldownTimeWindow    time.Duration `help:"Time window before ending track" default:"5m"`
+		TCPAddr               []string
+		UDPPort               []int
+		Verbose               bool
+		ForwardAISUDP         []string `name:"forward-ais-udp"`
+		ListenAllTCP          string   `default:":2000"`
+		ListenAISTCP          string   `default:":2010" name:"listen-ais-tcp"`
+		ListenPrometheus      string   `default:":9140"`
+	}
+
 	log.SetFlags(0)
 	kong.Parse(&cli)
 
@@ -73,5 +77,25 @@ func main() {
 		go http.ListenAndServe(cli.ListenPrometheus, nil)
 	}
 
-	collect(prefix(c, "$"))
+	gpx := &gpx.AutoGPX{
+		Opener:                newGPXFile,
+		SampleInterval:        cli.SampleInterval,
+		TriggerDistanceMeters: cli.TriggerDistanceMeters,
+		TriggerTimeWindow:     cli.TriggerTimeWindow,
+		CooldownTimeWindow:    cli.CooldownTimeWindow,
+	}
+	collectGPX(prefix(c, "$"), gpx)
+}
+
+var gpxFilesCreatedTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Namespace: "nmea",
+	Subsystem: "gpx",
+	Name:      "files_created_total",
+})
+
+func newGPXFile() (io.WriteCloser, error) {
+	name := time.Now().UTC().Format("track-20060102-150405.gpx")
+	log.Println("Creating new GPX track", name)
+	gpxFilesCreatedTotal.Inc()
+	return os.Create(name)
 }

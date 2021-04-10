@@ -40,7 +40,7 @@ var (
 
 func forwardAIS(c <-chan string, addrs []string) {
 	dsts := make([]net.Conn, 0, len(addrs))
-	for _, addr := range cli.ForwardAISUDP {
+	for _, addr := range addrs {
 		dst, err := net.Dial("udp", addr)
 		if err != nil {
 			log.Printf("Can't forward to %s: %v", addr, err)

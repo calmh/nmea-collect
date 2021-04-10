@@ -1,4 +1,4 @@
-module github.com/kastelo/nmea-collect
+module github.com/calmh/nmea-collect
 
 go 1.15
 
