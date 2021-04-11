@@ -21,8 +21,7 @@ var (
 	})
 )
 
-func collectRAW(c <-chan string) error {
-	pat := "raw.20060102.nmea.gz"
+func collectRAW(filePat string, bufSize int, c <-chan string) error {
 	cur := ""
 	var fd io.WriteCloser
 	defer func() {
@@ -36,7 +35,7 @@ func collectRAW(c <-chan string) error {
 		now := time.Now().UTC()
 		trunc := now.Truncate(time.Second)
 
-		name := trunc.Format(pat)
+		name := trunc.Format(filePat)
 		if name != cur {
 			if fd != nil {
 				fd.Close()
@@ -46,7 +45,7 @@ func collectRAW(c <-chan string) error {
 				return err
 			}
 			gw := gzip.NewWriter(nfd)
-			bw := bufio.NewWriterSize(gw, 65536)
+			bw := bufio.NewWriterSize(gw, bufSize)
 			fd = &bufWriter{Writer: gw, bw: bw}
 			cur = name
 		}

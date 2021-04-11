@@ -28,7 +28,8 @@ func main() {
 		ListenAllTCP          string   `default:":2000"`
 		ListenAISTCP          string   `default:":2010" name:"listen-ais-tcp"`
 		ListenPrometheus      string   `default:":9140"`
-		SaveRaw               bool     `default:"true"`
+		RawFilePattern        string   `default:"nmea-raw.20060102.gz"`
+		RawFileWriteBuffer    int      `default:"131072"`
 	}
 
 	log.SetFlags(0)
@@ -78,10 +79,10 @@ func main() {
 		go http.ListenAndServe(cli.ListenPrometheus, nil)
 	}
 
-	if cli.SaveRaw {
+	if cli.RawFilePattern != "" {
 		a, b := tee(c)
 		c = a
-		go collectRAW(b)
+		go collectRAW(cli.RawFilePattern, cli.RawFileWriteBuffer, b)
 	}
 
 	gpx := &gpx.AutoGPX{
