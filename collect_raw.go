@@ -22,7 +22,7 @@ var (
 )
 
 func collectRAW(c <-chan string) error {
-	pat := "raw.2006-01-02.nmea.gz"
+	pat := "raw.20060102.nmea.gz"
 	cur := ""
 	var fd io.WriteCloser
 	defer func() {
@@ -34,7 +34,7 @@ func collectRAW(c <-chan string) error {
 	var lastZDA time.Time
 	for line := range c {
 		now := time.Now().UTC()
-		trunc := now.Truncate(time.Minute)
+		trunc := now.Truncate(time.Second)
 
 		name := trunc.Format(pat)
 		if name != cur {
