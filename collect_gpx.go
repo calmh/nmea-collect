@@ -83,17 +83,9 @@ func collectGPX(c <-chan string, w *gpx.AutoGPX) {
 			vhw := sent.(nmea.VHW)
 			exts.Set("waterspeed", fmt.Sprintf("%.01f", vhw.SpeedThroughWaterKnots))
 
-		case nmea.TypeGLL:
-			gll := sent.(nmea.GLL)
-			when := time.Now()
-			if w.Sample(gll.Latitude, gll.Longitude, when, exts) {
-				gpxPositionsRecorded.Inc()
-			}
-			gpxPositionsSampled.Inc()
-
 		case nmea.TypeRMC:
 			rmc := sent.(nmea.RMC)
-			when := time.Now()
+			when := time.Date(rmc.Date.YY+2000, time.Month(rmc.Date.MM), rmc.Date.DD, rmc.Time.Hour, rmc.Time.Minute, rmc.Time.Second, rmc.Time.Millisecond*int(time.Millisecond), time.UTC)
 			if w.Sample(rmc.Latitude, rmc.Longitude, when, exts) {
 				gpxPositionsRecorded.Inc()
 			}

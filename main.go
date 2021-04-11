@@ -28,6 +28,7 @@ func main() {
 		ListenAllTCP          string   `default:":2000"`
 		ListenAISTCP          string   `default:":2010" name:"listen-ais-tcp"`
 		ListenPrometheus      string   `default:":9140"`
+		SaveRaw               bool     `default:"true"`
 	}
 
 	log.SetFlags(0)
@@ -77,6 +78,12 @@ func main() {
 		go http.ListenAndServe(cli.ListenPrometheus, nil)
 	}
 
+	if cli.SaveRaw {
+		a, b := tee(c)
+		c = a
+		go collectRAW(b)
+	}
+
 	gpx := &gpx.AutoGPX{
 		Opener:                newGPXFile,
 		SampleInterval:        cli.SampleInterval,
@@ -84,6 +91,7 @@ func main() {
 		TriggerTimeWindow:     cli.TriggerTimeWindow,
 		CooldownTimeWindow:    cli.CooldownTimeWindow,
 	}
+
 	collectGPX(prefix(c, "$"), gpx)
 }
 
