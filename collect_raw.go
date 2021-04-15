@@ -22,7 +22,6 @@ var (
 )
 
 func collectRAW(filePat string, bufSize int, c <-chan string) error {
-	cur := ""
 	var fd io.WriteCloser
 	defer func() {
 		if fd != nil {
@@ -31,15 +30,17 @@ func collectRAW(filePat string, bufSize int, c <-chan string) error {
 	}()
 
 	var lastZDA time.Time
+	var day time.Time
 	for line := range c {
 		now := time.Now().UTC()
-		trunc := now.Truncate(time.Second)
+		truncS := now.Truncate(time.Second)
+		truncDay := now.Truncate(24 * time.Hour)
 
-		name := trunc.Format(filePat)
-		if name != cur {
+		if !truncDay.Equal(day) {
 			if fd != nil {
 				fd.Close()
 			}
+			name := truncS.Format(filePat)
 			nfd, err := os.Create(name)
 			if err != nil {
 				return err
@@ -47,13 +48,13 @@ func collectRAW(filePat string, bufSize int, c <-chan string) error {
 			gw := gzip.NewWriter(nfd)
 			bw := bufio.NewWriterSize(gw, bufSize)
 			fd = &bufWriter{Writer: gw, bw: bw}
-			cur = name
+			day = truncDay
 		}
 
-		if !trunc.Equal(lastZDA) {
+		if !truncS.Equal(lastZDA) {
 			line := fmt.Sprintf("VRZDA,%s,%02d,%02d,%04d,00,00", now.Format("150405.00"), now.Day(), now.Month(), now.Year())
 			fmt.Fprintf(fd, "$%s*%s\n", line, nmea.Checksum(line))
-			lastZDA = trunc
+			lastZDA = truncS
 		}
 
 		fmt.Fprintf(fd, "%s\n", line)

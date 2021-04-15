@@ -28,7 +28,7 @@ func main() {
 		ListenAllTCP          string   `default:":2000"`
 		ListenAISTCP          string   `default:":2010" name:"listen-ais-tcp"`
 		ListenPrometheus      string   `default:":9140"`
-		RawFilePattern        string   `default:"nmea-raw.20060102.gz"`
+		RawFilePattern        string   `default:"nmea-raw.20060102-150405.gz"`
 		RawFileWriteBuffer    int      `default:"131072"`
 	}
 
