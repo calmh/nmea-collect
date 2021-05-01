@@ -30,7 +30,7 @@ var (
 func readTCPInto(c chan<- string, addr string) *lineWriter {
 	return &lineWriter{
 		reader: func() (io.ReadCloser, error) { return tcpReader(addr) },
-		name:   fmt.Sprintf("tcp-reader(%s)", addr),
+		name:   fmt.Sprintf("tcp/%s", addr),
 		lines:  c,
 	}
 }
@@ -46,7 +46,7 @@ func tcpReader(addr string) (io.ReadCloser, error) {
 func readUDPInto(c chan<- string, port int) *lineWriter {
 	return &lineWriter{
 		reader: func() (io.ReadCloser, error) { return udpReader(port) },
-		name:   fmt.Sprintf("udp-reader(%d)", port),
+		name:   fmt.Sprintf("udp/%d", port),
 		lines:  c,
 	}
 }
