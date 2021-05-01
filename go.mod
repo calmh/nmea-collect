@@ -7,4 +7,5 @@ require (
 	github.com/adrianmo/go-nmea v1.3.0
 	github.com/alecthomas/kong v0.2.16
 	github.com/prometheus/client_golang v1.10.0
+	github.com/thejerf/suture/v4 v4.0.0
 )

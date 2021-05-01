@@ -2,13 +2,12 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"strings"
-	"time"
 
 	nmea "github.com/adrianmo/go-nmea"
 	"github.com/prometheus/client_golang/prometheus"
@@ -28,19 +27,15 @@ var (
 	}, []string{"source"})
 )
 
-func readTCPInto(c chan<- string, addr string) {
-	for {
-		r, err := tcpReader(addr)
-		if err != nil {
-			log.Fatalln("TCP input:", err)
-		}
-		copyInto(c, lines(r, "tcp/"+addr))
-		time.Sleep(5 * time.Second)
+func readTCPInto(c chan<- string, addr string) *lineWriter {
+	return &lineWriter{
+		reader: func() (io.ReadCloser, error) { return tcpReader(addr) },
+		name:   fmt.Sprintf("tcp-reader(%s)", addr),
+		lines:  c,
 	}
 }
 
 func tcpReader(addr string) (io.ReadCloser, error) {
-	log.Printf("Reading NMEA from tcp/%s", addr)
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("reader: %w", err)
@@ -48,19 +43,15 @@ func tcpReader(addr string) (io.ReadCloser, error) {
 	return conn, nil
 }
 
-func readUDPInto(c chan<- string, port int) {
-	for {
-		r, err := udpReader(port)
-		if err != nil {
-			log.Println("UDP input:", err)
-		}
-		copyInto(c, lines(r, fmt.Sprintf("udp/%d", port)))
-		time.Sleep(5 * time.Second)
+func readUDPInto(c chan<- string, port int) *lineWriter {
+	return &lineWriter{
+		reader: func() (io.ReadCloser, error) { return udpReader(port) },
+		name:   fmt.Sprintf("udp-reader(%d)", port),
+		lines:  c,
 	}
 }
 
 func udpReader(port int) (io.ReadCloser, error) {
-	log.Printf("Reading NMEA from udp/%d", port)
 	laddr := &net.UDPAddr{Port: port}
 	conn, err := net.ListenUDP("udp", laddr)
 	if err != nil {
@@ -69,85 +60,126 @@ func udpReader(port int) (io.ReadCloser, error) {
 	return conn, nil
 }
 
-func readSerialInto(c chan<- string, dev string) {
-	for {
-		r, err := os.Open(dev)
-		if err != nil {
-			log.Println("Serial input:", err)
-		}
-		copyInto(c, lines(r, dev))
-		time.Sleep(5 * time.Second)
+func readSerialInto(c chan<- string, dev string) *lineWriter {
+	return &lineWriter{
+		reader: func() (io.ReadCloser, error) { return os.Open(dev) },
+		name:   dev,
+		lines:  c,
 	}
 }
 
-func prefix(c <-chan string, prefix string) <-chan string {
-	res := make(chan string)
-	go func() {
-		defer close(res)
-		for s := range c {
-			if strings.HasPrefix(s, prefix) {
-				res <- s
-			}
-		}
-	}()
-	return res
+type lineWriter struct {
+	reader func() (io.ReadCloser, error)
+	name   string
+	lines  chan<- string
 }
 
-func lines(r io.ReadCloser, name string) <-chan string {
-	sc := bufio.NewScanner(r)
+func (r *lineWriter) String() string {
+	return fmt.Sprintf("%s@%p", r.name, r)
+}
+
+func (r *lineWriter) Serve(ctx context.Context) error {
+	reader, err := r.reader()
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	sc := bufio.NewScanner(reader)
 	sc.Buffer(make([]byte, 0, 65536), 65536)
 
-	nmeaMessagesInput.WithLabelValues(name)
-	nmeaMessagesBad.WithLabelValues(name)
+	nmeaMessagesInput.WithLabelValues(r.name)
+	nmeaMessagesBad.WithLabelValues(r.name)
 
-	res := make(chan string)
-	go func() {
-		defer close(res)
-		defer r.Close()
-		for sc.Scan() {
-			line := sc.Text()
-			nmeaMessagesInput.WithLabelValues(name).Inc()
-			if line == "" {
-				nmeaMessagesBad.WithLabelValues(name).Inc()
+	for sc.Scan() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		line := sc.Text()
+		nmeaMessagesInput.WithLabelValues(r.name).Inc()
+		if line == "" {
+			nmeaMessagesBad.WithLabelValues(r.name).Inc()
+			continue
+		}
+		switch line[0] {
+		case '!', '$':
+			idx := strings.LastIndexByte(line, '*')
+			if idx == -1 {
+				nmeaMessagesBad.WithLabelValues(r.name).Inc()
 				continue
 			}
-			switch line[0] {
-			case '!', '$':
-				idx := strings.LastIndexByte(line, '*')
-				if idx == -1 {
-					nmeaMessagesBad.WithLabelValues(name).Inc()
-					continue
-				}
-				chk := nmea.Checksum(line[1:idx])
-				if chk != line[idx+1:] {
-					nmeaMessagesBad.WithLabelValues(name).Inc()
-					continue
-				}
-				res <- line
-			default:
-				nmeaMessagesBad.WithLabelValues(name).Inc()
+			chk := nmea.Checksum(line[1:idx])
+			if chk != line[idx+1:] {
+				nmeaMessagesBad.WithLabelValues(r.name).Inc()
+				continue
 			}
+			select {
+			case r.lines <- line:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		default:
+			nmeaMessagesBad.WithLabelValues(r.name).Inc()
 		}
-	}()
-	return res
+	}
+
+	return sc.Err()
 }
 
-func copyInto(dst chan<- string, src <-chan string) {
-	for s := range src {
-		dst <- s
+func linesInto(c chan<- string, r io.ReadCloser, name string) *lineWriter {
+	return &lineWriter{
+		reader: func() (io.ReadCloser, error) { return r, nil },
+		name:   name,
+		lines:  make(chan string, 1),
 	}
 }
 
-func tee(c <-chan string) (chan string, chan string) {
-	a := make(chan string)
-	b := make(chan string)
-	go func() {
-		defer close(a)
-		defer close(b)
-		for s := range c {
-			a <- s
-			b <- s
+type Tee struct {
+	input   <-chan string
+	prefix  string
+	outputs []chan string
+}
+
+func NewTee(input <-chan string) *Tee {
+	return &Tee{input: input}
+}
+
+func NewFilteredTee(input <-chan string, prefix string) *Tee {
+	return &Tee{input: input, prefix: prefix}
+}
+
+func (t *Tee) String() string {
+	if t.prefix == "" {
+		return fmt.Sprintf("nmea-tee@%p", t)
+	}
+	return fmt.Sprintf("nmea-tee(%q)@%p", t.prefix, t)
+}
+
+func (t *Tee) Output() <-chan string {
+	c := make(chan string, 1)
+	t.outputs = append(t.outputs, c)
+	return c
+}
+
+func (t *Tee) Serve(ctx context.Context) error {
+	for {
+		select {
+		case line := <-t.input:
+			if !strings.HasPrefix(line, t.prefix) {
+				continue
+			}
+			for _, out := range t.outputs {
+				select {
+				case out <- line:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-	}()
-	return a, b
+	}
 }

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"io"
 	"log"
-	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	nmea "github.com/adrianmo/go-nmea"
@@ -12,7 +14,7 @@ import (
 	"github.com/calmh/nmea-collect/gpx"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/thejerf/suture/v4"
 )
 
 func main() {
@@ -33,6 +35,7 @@ func main() {
 		ForwardAllTCPListen string `default:":2000" help:"TCP listen address (all NMEA)" placeholder:"ADDR" group:"TCP output"`
 		ForwardAISTCPListen string `default:":2010" name:"forward-ais-tcp-listen" help:"TCP listen address (AIS only)" placeholder:"ADDR" group:"TCP output"`
 
+		OutputGPXPattern         string        `default:"track-20060102-150405.gpx" help:"File naming pattern, see https://golang.org/pkg/time/#Time.Format" group:"GPX File Output"`
 		OutputGPXSampleInterval  time.Duration `help:"Time between track points" default:"10s" group:"GPX File Output"`
 		OutputGPXMovingDistance  float64       `help:"Minimum travel in time window to consider us moving (m)" default:"25" group:"GPX File Output"`
 		OutputGPXStartTimeWindow time.Duration `help:"Movement time window for starting track" default:"1m" group:"GPX File Output"`
@@ -50,76 +53,94 @@ func main() {
 	kong.Parse(&cli)
 
 	for key, parser := range parsers {
-		nmea.RegisterParser(key, parser)
+		_ = nmea.RegisterParser(key, parser)
 	}
 
-	c := make(chan string)
+	sup := suture.NewSimple("main")
+	input := make(chan string, 1)
+	tee := NewTee(input)
+	sup.Add(tee)
 
 	if cli.InputStdin {
-		go copyInto(c, lines(os.Stdin, "stdin"))
+		log.Println("Reading NMEA from stdin")
+		sup.Add(linesInto(input, os.Stdin, "stdin"))
 	}
 
 	for _, addr := range cli.InputTCPConnect {
-		go readTCPInto(c, addr)
+		log.Println("Reading NMEA from TCP", addr)
+		sup.Add(readTCPInto(input, addr))
 	}
 
 	for _, port := range cli.InputUDPListen {
-		go readUDPInto(c, port)
+		log.Println("Reading NMEA on UDP port", port)
+		sup.Add(readUDPInto(input, port))
 	}
 
 	for _, dev := range cli.InputSerial {
-		go readSerialInto(c, dev)
+		log.Println("Reading NMEA from serial device", dev)
+		sup.Add(readSerialInto(input, dev))
 	}
 
 	if cli.ForwardAllTCPListen != "" {
-		a, b := tee(c)
-		c = a
-		go forwardTCP(b, cli.ForwardAllTCPListen)
+		log.Println("Forwarding NMEA to incoming connections on", cli.ForwardAllTCPListen)
+		sup.Add(forwardTCP(tee.Output(), cli.ForwardAllTCPListen))
 	}
 
 	if len(cli.ForwardUDPAll) > 0 {
-		a, b := tee(c)
-		c = a
-		go forwardUDP(b, cli.ForwardUDPAll, cli.ForwardUDPAllMaxPacketSize, cli.ForwardUDPAllMaxDelay)
+		log.Println("Forwarding NMEA to UDP", strings.Join(cli.ForwardUDPAll, ", "))
+		sup.Add(forwardUDP(tee.Output(), cli.ForwardUDPAll, cli.ForwardUDPAllMaxPacketSize, cli.ForwardUDPAllMaxDelay))
 	}
 
+	var ais *Tee
+
 	if len(cli.ForwardUDPAIS) > 0 {
-		a, b := tee(c)
-		c = a
-		ais := prefix(b, "!AI")
-		go forwardUDP(ais, cli.ForwardUDPAIS, cli.ForwardUDPAISMaxPacketSize, cli.ForwardUDPAISMaxDelay)
+		if ais == nil {
+			ais = NewFilteredTee(tee.Output(), "!AI")
+			sup.Add(ais)
+		}
+		log.Println("Forwarding AIS to UDP", strings.Join(cli.ForwardUDPAIS, ", "))
+		sup.Add(forwardUDP(ais.Output(), cli.ForwardUDPAIS, cli.ForwardUDPAISMaxPacketSize, cli.ForwardUDPAISMaxDelay))
 	}
 
 	if cli.ForwardAISTCPListen != "" {
-		a, b := tee(c)
-		c = a
-		ais := prefix(b, "!AI")
-		go forwardTCP(ais, cli.ForwardAISTCPListen)
+		if ais == nil {
+			ais = NewFilteredTee(tee.Output(), "!AI")
+			sup.Add(ais)
+		}
+		log.Println("Forwarding AIS to incoming connections on", cli.ForwardAISTCPListen)
+		sup.Add(forwardTCP(ais.Output(), cli.ForwardAISTCPListen))
 	}
 
 	if cli.PrometheusMetricsListen != "" {
-		a, b := tee(c)
-		c = a
-		go exposeMetrics(b)
-		http.Handle("/metrics", promhttp.Handler())
-		go http.ListenAndServe(cli.PrometheusMetricsListen, nil)
+		url := &url.URL{Scheme: "http", Host: cli.PrometheusMetricsListen, Path: "/metrics"}
+		log.Println("Exporting instruments and metrics on", url)
+		sup.Add(&instrumentsCollector{tee.Output()})
+		sup.Add(&prometheusListener{cli.PrometheusMetricsListen})
 	}
 
 	if cli.OutputRawPattern != "" {
-		a, b := tee(c)
-		c = a
-		go collectRAW(cli.OutputRawPattern, cli.OutputRawBufferSize, cli.OutputRawTimeWindow, !cli.OutputRawUncompressed, b)
+		log.Println("Writing raw files to files named like", cli.OutputRawPattern)
+		sup.Add(collectRAW(cli.OutputRawPattern, cli.OutputRawBufferSize, cli.OutputRawTimeWindow, !cli.OutputRawUncompressed, tee.Output()))
 	}
 
-	gpx := &gpx.AutoGPX{
-		Opener:                newGPXFile,
-		SampleInterval:        cli.OutputGPXSampleInterval,
-		TriggerDistanceMeters: cli.OutputGPXMovingDistance,
-		TriggerTimeWindow:     cli.OutputGPXStartTimeWindow,
-		CooldownTimeWindow:    cli.OutputGPXStopTimeWindow,
+	if cli.OutputGPXPattern != "" {
+		gpx := &gpx.AutoGPX{
+			Opener: func() (io.WriteCloser, error) {
+				return newGPXFile(cli.OutputGPXPattern)
+			},
+			SampleInterval:        cli.OutputGPXSampleInterval,
+			TriggerDistanceMeters: cli.OutputGPXMovingDistance,
+			TriggerTimeWindow:     cli.OutputGPXStartTimeWindow,
+			CooldownTimeWindow:    cli.OutputGPXStopTimeWindow,
+		}
+
+		log.Println("Collecting GPX tracks to files named like", cli.OutputGPXPattern)
+		nonAIS := NewFilteredTee(tee.Output(), "$")
+		sup.Add(nonAIS)
+		sup.Add(collectGPX(nonAIS.Output(), gpx))
 	}
 
-	collectGPX(prefix(c, "$"), gpx)
+	log.Fatal(sup.Serve(context.Background()))
 }
 
 var gpxFilesCreatedTotal = promauto.NewCounter(prometheus.CounterOpts{
@@ -128,8 +149,8 @@ var gpxFilesCreatedTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Name:      "files_created_total",
 })
 
-func newGPXFile() (io.WriteCloser, error) {
-	name := time.Now().UTC().Format("track-20060102-150405.gpx")
+func newGPXFile(pattern string) (io.WriteCloser, error) {
+	name := time.Now().UTC().Format(pattern)
 	log.Println("Creating new GPX track", name)
 	gpxFilesCreatedTotal.Inc()
 	return os.Create(name)

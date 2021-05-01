@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,15 +37,36 @@ var (
 	}, []string{"destination"})
 )
 
-func forwardUDP(c <-chan string, addrs []string, maxPacketSize int, maxDelay time.Duration) {
-	dsts := make([]net.Conn, 0, len(addrs))
-	for _, addr := range addrs {
+type udpForwarder struct {
+	c             <-chan string
+	addrs         []string
+	maxPacketSize int
+	maxDelay      time.Duration
+	buf           bytes.Buffer
+}
+
+func forwardUDP(c <-chan string, addrs []string, maxPacketSize int, maxDelay time.Duration) *udpForwarder {
+	return &udpForwarder{
+		c:             c,
+		addrs:         addrs,
+		maxPacketSize: maxPacketSize,
+		maxDelay:      maxDelay,
+	}
+}
+
+func (f *udpForwarder) String() string {
+	return fmt.Sprintf("udp-forwarder(%s)@%p", strings.Join(f.addrs, "-"), f)
+}
+
+func (f *udpForwarder) Serve(ctx context.Context) error {
+	dsts := make([]net.Conn, 0, len(f.addrs))
+	for _, addr := range f.addrs {
 		dst, err := net.Dial("udp", addr)
 		if err != nil {
 			log.Printf("Can't forward to %s: %v", addr, err)
 			continue
 		}
-		log.Println("Forwarding to udp/" + addr)
+		defer dst.Close()
 		dsts = append(dsts, dst)
 
 		dstAddr := dst.RemoteAddr().String()
@@ -51,47 +75,44 @@ func forwardUDP(c <-chan string, addrs []string, maxPacketSize int, maxDelay tim
 		aisSendErrors.WithLabelValues(dstAddr)
 	}
 	if len(dsts) == 0 {
-		log.Fatal("No valid UDP forward destination")
+		return errors.New("no UDP forward destination")
 	}
 
-	outBuf := new(bytes.Buffer)
-
-	flush := func() {
-		if outBuf.Len() == 0 {
-			return
-		}
-		for _, dst := range dsts {
-			_, err := dst.Write(outBuf.Bytes())
-			dstAddr := dst.RemoteAddr().String()
-			if err != nil {
-				log.Printf("Write %v: %v", dst.RemoteAddr(), err)
-				aisSendErrors.WithLabelValues(dstAddr).Inc()
-				continue
-			}
-			aisSentPackets.WithLabelValues(dstAddr).Inc()
-			aisSentBytes.WithLabelValues(dstAddr).Add(float64(outBuf.Len()))
-		}
-		outBuf.Reset()
-	}
-
-	timer := time.NewTimer(maxDelay)
+	timer := time.NewTimer(f.maxDelay)
 	defer timer.Stop()
 
 	for {
 		select {
-		case line := <-c:
+		case line := <-f.c:
 			aisReceivedMessages.Inc()
 
-			if outBuf.Len()+len(line)+2 > maxPacketSize {
-				flush()
-				timer.Reset(maxDelay)
+			if f.buf.Len()+len(line)+2 > f.maxPacketSize {
+				f.flush(dsts)
+				timer.Reset(f.maxDelay)
 			}
 
-			fmt.Fprintf(outBuf, "%s\r\n", line)
+			fmt.Fprintf(&f.buf, "%s\r\n", line)
 
 		case <-timer.C:
-			flush()
-			timer.Reset(maxDelay)
+			f.flush(dsts)
+			timer.Reset(f.maxDelay)
 		}
 	}
+}
+
+func (f *udpForwarder) flush(dsts []net.Conn) {
+	if f.buf.Len() == 0 {
+		return
+	}
+	for _, dst := range dsts {
+		_, err := dst.Write(f.buf.Bytes())
+		dstAddr := dst.RemoteAddr().String()
+		if err != nil {
+			aisSendErrors.WithLabelValues(dstAddr).Inc()
+			continue
+		}
+		aisSentPackets.WithLabelValues(dstAddr).Inc()
+		aisSentBytes.WithLabelValues(dstAddr).Add(float64(f.buf.Len()))
+	}
+	f.buf.Reset()
 }
