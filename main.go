@@ -21,12 +21,13 @@ func main() {
 		TriggerDistanceMeters float64       `help:"Minimum movement to start track (m)" default:"25"`
 		TriggerTimeWindow     time.Duration `help:"Time window for starting track" default:"1m"`
 		CooldownTimeWindow    time.Duration `help:"Time window before ending track" default:"5m"`
-		TCPAddr               []string
-		UDPPort               []int
+		TCPAddr               []string      `help:"TCP input addr (e.g., 172.16.1.2:2000)" placeholder:"ADDR"`
+		UDPPort               []int         `help:"UDP input listen port (e.g., 2000)" placeholder:"PORT"`
+		Serial                []string      `help:"Serial port input (e.g., /dev/ttyS0)" placeholder:"DEV"`
 		Verbose               bool
-		ForwardAISUDP         []string `name:"forward-ais-udp"`
-		ListenAllTCP          string   `default:":2000"`
-		ListenAISTCP          string   `default:":2010" name:"listen-ais-tcp"`
+		ForwardAISUDP         []string `name:"forward-ais-udp" help:"Forward AIS to UDP target" placeholder:"ADDR"`
+		ListenAllTCP          string   `default:":2000" help:"TCP output listen address (all NMEA)" placeholder:"ADDR"`
+		ListenAISTCP          string   `default:":2010" name:"listen-ais-tcp" help:"TCP output listen address (AIS only)" placeholder:"ADDR"`
 		ListenPrometheus      string   `default:":9140"`
 		RawFilePattern        string   `default:"nmea-raw.20060102-150405.gz"`
 		RawFileWriteBuffer    int      `default:"131072"`
@@ -49,6 +50,10 @@ func main() {
 
 	for _, port := range cli.UDPPort {
 		go readUDPInto(c, port)
+	}
+
+	for _, dev := range cli.Serial {
+		go readSerialInto(c, dev)
 	}
 
 	if cli.ListenAllTCP != "" {

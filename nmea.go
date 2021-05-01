@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -38,7 +39,7 @@ func readTCPInto(c chan<- string, addr string) {
 	}
 }
 
-func tcpReader(addr string) (io.Reader, error) {
+func tcpReader(addr string) (io.ReadCloser, error) {
 	log.Printf("Reading NMEA from tcp/%s", addr)
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -58,7 +59,7 @@ func readUDPInto(c chan<- string, port int) {
 	}
 }
 
-func udpReader(port int) (io.Reader, error) {
+func udpReader(port int) (io.ReadCloser, error) {
 	log.Printf("Reading NMEA from udp/%d", port)
 	laddr := &net.UDPAddr{Port: port}
 	conn, err := net.ListenUDP("udp", laddr)
@@ -66,6 +67,17 @@ func udpReader(port int) (io.Reader, error) {
 		return nil, fmt.Errorf("reader: %w", err)
 	}
 	return conn, nil
+}
+
+func readSerialInto(c chan<- string, dev string) {
+	for {
+		r, err := os.Open(dev)
+		if err != nil {
+			log.Println("Serial input:", err)
+		}
+		copyInto(c, lines(r, dev))
+		time.Sleep(5 * time.Second)
+	}
 }
 
 func prefix(c <-chan string, prefix string) <-chan string {
@@ -81,7 +93,7 @@ func prefix(c <-chan string, prefix string) <-chan string {
 	return res
 }
 
-func lines(r io.Reader, name string) <-chan string {
+func lines(r io.ReadCloser, name string) <-chan string {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 65536), 65536)
 
@@ -91,6 +103,7 @@ func lines(r io.Reader, name string) <-chan string {
 	res := make(chan string)
 	go func() {
 		defer close(res)
+		defer r.Close()
 		for sc.Scan() {
 			line := sc.Text()
 			nmeaMessagesInput.WithLabelValues(name).Inc()
