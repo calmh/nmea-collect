@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	nmea "github.com/adrianmo/go-nmea"
 	"github.com/prometheus/client_golang/prometheus"
@@ -63,6 +64,12 @@ func (l *instrumentsCollector) String() string {
 }
 
 func (l *instrumentsCollector) Serve(ctx context.Context) error {
+	const instrumentRetention = time.Minute
+	instrumentTimeout := time.NewTimer(instrumentRetention)
+	defer instrumentTimeout.Stop()
+	positionTimeout := time.NewTimer(instrumentRetention)
+	defer positionTimeout.Stop()
+
 	for {
 		select {
 		case line := <-l.c:
@@ -75,35 +82,55 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 			case TypeDPT:
 				dpt := sent.(DPT)
 				waterDepth.Set(dpt.Depth)
+				instrumentTimeout.Reset(instrumentRetention)
 
 			case TypeHDG:
 				hdg := sent.(HDG)
 				heading.Set(hdg.Heading)
+				instrumentTimeout.Reset(instrumentRetention)
 
 			case TypeMTW:
 				mtw := sent.(MTW)
 				waterTemp.Set(mtw.Temperature)
+				instrumentTimeout.Reset(instrumentRetention)
 
 			case TypeMWV:
 				mwv := sent.(MWV)
 				if mwv.Reference == "R" && mwv.Status == "A" {
 					windAngle.Set(mwv.Angle)
 					windSpeed.Set(mwv.Speed)
+					instrumentTimeout.Reset(instrumentRetention)
 				}
 
 			case TypeVLW:
 				mwv := sent.(VLW)
 				logDistance.Set(mwv.TotalDistanceNauticalMiles)
+				instrumentTimeout.Reset(instrumentRetention)
 
 			case nmea.TypeVHW:
 				vhw := sent.(nmea.VHW)
 				logSpeed.Set(vhw.SpeedThroughWaterKnots)
+				instrumentTimeout.Reset(instrumentRetention)
 
-			case nmea.TypeGLL:
-				rmc := sent.(nmea.GLL)
+			case nmea.TypeRMC:
+				rmc := sent.(nmea.RMC)
 				position.WithLabelValues("lat").Set(rmc.Latitude)
 				position.WithLabelValues("lon").Set(rmc.Longitude)
+				positionTimeout.Reset(instrumentRetention)
 			}
+
+		case <-instrumentTimeout.C:
+			waterDepth.Set(0)
+			heading.Set(0)
+			waterTemp.Set(0)
+			windAngle.Set(0)
+			windSpeed.Set(0)
+			logDistance.Set(0)
+			logSpeed.Set(0)
+
+		case <-positionTimeout.C:
+			position.WithLabelValues("lat").Set(0)
+			position.WithLabelValues("lon").Set(0)
 
 		case <-ctx.Done():
 			return ctx.Err()
