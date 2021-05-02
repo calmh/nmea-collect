@@ -53,6 +53,11 @@ var (
 		Subsystem: "instruments",
 		Name:      "gps_position",
 	}, []string{"axis"})
+	voltage = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "nmea",
+		Subsystem: "ais",
+		Name:      "supply_voltage",
+	})
 )
 
 type instrumentsCollector struct {
@@ -117,6 +122,10 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 				position.WithLabelValues("lat").Set(rmc.Latitude)
 				position.WithLabelValues("lon").Set(rmc.Longitude)
 				positionTimeout.Reset(instrumentRetention)
+
+			case TypeSMT:
+				rmc := sent.(SMT)
+				voltage.Set(rmc.SupplyVoltage)
 			}
 
 		case <-instrumentTimeout.C:

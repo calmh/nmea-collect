@@ -11,6 +11,7 @@ const (
 	TypeMTW = "MTW"
 	TypeMWV = "MWV"
 	TypeVLW = "VLW"
+	TypeSMT = "SMT"
 )
 
 var parsers = map[string]nmea.ParserFunc{
@@ -19,6 +20,7 @@ var parsers = map[string]nmea.ParserFunc{
 	TypeMTW: parseMTW,
 	TypeMWV: parseMWV,
 	TypeVLW: parseVLW,
+	TypeSMT: parseSMT,
 }
 
 // Mean Temperature of Water
@@ -120,6 +122,23 @@ func parseVLW(s nmea.BaseSentence) (nmea.Sentence, error) {
 		BaseSentence:                    s,
 		TotalDistanceNauticalMiles:      p.Float64(0, "total distance"),
 		DistancesinceResetNauticalMiles: p.Float64(2, "distance since reset"),
+	}
+	return m, p.Err()
+}
+
+//  Voltage
+
+type SMT struct {
+	nmea.BaseSentence
+	SupplyVoltage float64
+}
+
+func parseSMT(s nmea.BaseSentence) (nmea.Sentence, error) {
+	p := nmea.NewParser(s)
+	p.AssertType(TypeSMT)
+	m := SMT{
+		BaseSentence:  s,
+		SupplyVoltage: p.Float64(3, "voltage") / 1000,
 	}
 	return m, p.Err()
 }

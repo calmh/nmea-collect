@@ -19,10 +19,11 @@ import (
 
 func main() {
 	var cli struct {
-		InputTCPConnect []string `help:"TCP connect input addresses (e.g., 172.16.1.2:2000)" placeholder:"ADDR" group:"Input"`
-		InputUDPListen  []int    `help:"UDP broadcast input listen ports (e.g., 2000)" placeholder:"PORT" group:"Input"`
-		InputSerial     []string `help:"Serial port inputs (e.g., /dev/ttyS0)" placeholder:"DEV" group:"Input"`
-		InputStdin      bool     `help:"Read NMEA from standard input" group:"Input"`
+		InputTCPConnect    []string `help:"TCP connect input addresses (e.g., 172.16.1.2:2000)" placeholder:"ADDR" group:"Input"`
+		InputUDPListen     []int    `help:"UDP broadcast input listen ports (e.g., 2000)" placeholder:"PORT" group:"Input"`
+		InputSerial        []string `help:"Serial port inputs (e.g., /dev/ttyS0)" placeholder:"DEV" group:"Input"`
+		InputStdin         bool     `help:"Read NMEA from standard input" group:"Input"`
+		InputSerialVoltage bool     `help:"Read supply voltage from serial connected SRT AIS" default:"true"`
 
 		ForwardUDPAll              []string      `help:"UDP output destination address (all NMEA)" placeholder:"ADDR" group:"UDP output"`
 		ForwardUDPAllMaxPacketSize int           `help:"Maximum UDP payload size (all NMEA)" default:"1472" group:"UDP output"`
@@ -79,6 +80,9 @@ func main() {
 	for _, dev := range cli.InputSerial {
 		log.Println("Reading NMEA from serial device", dev)
 		sup.Add(readSerialInto(input, dev))
+		if cli.InputSerialVoltage {
+			sup.Add(&srtAISProber{dev})
+		}
 	}
 
 	if cli.ForwardAllTCPListen != "" {
