@@ -58,8 +58,8 @@ func main() {
 	}
 
 	sup := suture.NewSimple("main")
-	input := make(chan string, 1)
-	tee := NewTee(input)
+	input := make(chan string, 4096)
+	tee := NewTee("main", input)
 	sup.Add(tee)
 
 	if cli.InputStdin {
@@ -99,7 +99,7 @@ func main() {
 
 	if len(cli.ForwardUDPAIS) > 0 {
 		if ais == nil {
-			ais = NewFilteredTee(tee.Output(), "!AI")
+			ais = NewFilteredTee("AIS", tee.Output(), "!AI")
 			sup.Add(ais)
 		}
 		log.Println("Forwarding AIS to UDP", strings.Join(cli.ForwardUDPAIS, ", "))
@@ -108,7 +108,7 @@ func main() {
 
 	if cli.ForwardAISTCPListen != "" {
 		if ais == nil {
-			ais = NewFilteredTee(tee.Output(), "!AI")
+			ais = NewFilteredTee("AIS", tee.Output(), "!AI")
 			sup.Add(ais)
 		}
 		log.Println("Forwarding AIS to incoming connections on", cli.ForwardAISTCPListen)
@@ -139,7 +139,7 @@ func main() {
 		}
 
 		log.Println("Collecting GPX tracks to files named like", cli.OutputGPXPattern)
-		nonAIS := NewFilteredTee(tee.Output(), "$")
+		nonAIS := NewFilteredTee("non-AIS", tee.Output(), "$")
 		sup.Add(nonAIS)
 		sup.Add(collectGPX(nonAIS.Output(), gpx))
 	}

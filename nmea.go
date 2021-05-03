@@ -15,6 +15,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+const teeBufferSize = 4096
+
 var (
 	nmeaMessagesInput = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "nmea",
@@ -26,6 +28,26 @@ var (
 		Subsystem: "input",
 		Name:      "messages_bad_total",
 	}, []string{"source"})
+	nmeaMessagesTeeRead = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "nmea",
+		Subsystem: "tee",
+		Name:      "messages_input_total",
+	}, []string{"tee"})
+	nmeaMessagesTeeSent = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "nmea",
+		Subsystem: "tee",
+		Name:      "messages_output_total",
+	}, []string{"tee"})
+	nmeaMessagesTeeFilterSkipped = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "nmea",
+		Subsystem: "tee",
+		Name:      "messages_filter_skipped_total",
+	}, []string{"tee"})
+	nmeaMessagesTeeDropped = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "nmea",
+		Subsystem: "tee",
+		Name:      "messages_dropped_total",
+	}, []string{"tee"})
 )
 
 func readTCPInto(c chan<- string, addr string) *lineWriter {
@@ -139,17 +161,18 @@ func linesInto(c chan<- string, r io.ReadCloser, name string) *lineWriter {
 }
 
 type Tee struct {
+	name    string
 	input   <-chan string
 	prefix  string
 	outputs []chan string
 }
 
-func NewTee(input <-chan string) *Tee {
-	return &Tee{input: input}
+func NewTee(name string, input <-chan string) *Tee {
+	return &Tee{name: name, input: input}
 }
 
-func NewFilteredTee(input <-chan string, prefix string) *Tee {
-	return &Tee{input: input, prefix: prefix}
+func NewFilteredTee(name string, input <-chan string, prefix string) *Tee {
+	return &Tee{name: name, input: input, prefix: prefix}
 }
 
 func (t *Tee) String() string {
@@ -160,7 +183,7 @@ func (t *Tee) String() string {
 }
 
 func (t *Tee) Output() <-chan string {
-	c := make(chan string, 1)
+	c := make(chan string, teeBufferSize)
 	t.outputs = append(t.outputs, c)
 	return c
 }
@@ -169,14 +192,19 @@ func (t *Tee) Serve(ctx context.Context) error {
 	for {
 		select {
 		case line := <-t.input:
+			nmeaMessagesTeeRead.WithLabelValues(t.name).Inc()
 			if !strings.HasPrefix(line, t.prefix) {
+				nmeaMessagesTeeFilterSkipped.WithLabelValues(t.name).Inc()
 				continue
 			}
 			for _, out := range t.outputs {
 				select {
 				case out <- line:
+					nmeaMessagesTeeSent.WithLabelValues(t.name).Inc()
 				case <-ctx.Done():
 					return ctx.Err()
+				default:
+					nmeaMessagesTeeDropped.WithLabelValues(t.name).Inc()
 				}
 			}
 		case <-ctx.Done():
