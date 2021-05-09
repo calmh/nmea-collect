@@ -28,6 +28,21 @@ var (
 		Subsystem: "input",
 		Name:      "messages_bad_total",
 	}, []string{"source"})
+	nmeaMessagesEmpty = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "nmea",
+		Subsystem: "input",
+		Name:      "messages_empty_total",
+	}, []string{"source"})
+	nmeaMessagesNoChecksum = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "nmea",
+		Subsystem: "input",
+		Name:      "messages_no_checksum_total",
+	}, []string{"source"})
+	nmeaMessagesNonNMEA = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "nmea",
+		Subsystem: "input",
+		Name:      "messages_non_nmea_total",
+	}, []string{"source"})
 	nmeaMessagesTeeRead = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "nmea",
 		Subsystem: "tee",
@@ -113,6 +128,9 @@ func (r *lineWriter) Serve(ctx context.Context) error {
 
 	nmeaMessagesInput.WithLabelValues(r.name)
 	nmeaMessagesBad.WithLabelValues(r.name)
+	nmeaMessagesEmpty.WithLabelValues(r.name)
+	nmeaMessagesNoChecksum.WithLabelValues(r.name)
+	nmeaMessagesNonNMEA.WithLabelValues(r.name)
 
 	for sc.Scan() {
 		select {
@@ -124,14 +142,14 @@ func (r *lineWriter) Serve(ctx context.Context) error {
 		line := sc.Text()
 		nmeaMessagesInput.WithLabelValues(r.name).Inc()
 		if line == "" {
-			nmeaMessagesBad.WithLabelValues(r.name).Inc()
+			nmeaMessagesEmpty.WithLabelValues(r.name).Inc()
 			continue
 		}
 		switch line[0] {
 		case '!', '$':
 			idx := strings.LastIndexByte(line, '*')
 			if idx == -1 {
-				nmeaMessagesBad.WithLabelValues(r.name).Inc()
+				nmeaMessagesNoChecksum.WithLabelValues(r.name).Inc()
 				continue
 			}
 			chk := nmea.Checksum(line[1:idx])
@@ -145,7 +163,7 @@ func (r *lineWriter) Serve(ctx context.Context) error {
 				return ctx.Err()
 			}
 		default:
-			nmeaMessagesBad.WithLabelValues(r.name).Inc()
+			nmeaMessagesNonNMEA.WithLabelValues(r.name).Inc()
 		}
 	}
 
