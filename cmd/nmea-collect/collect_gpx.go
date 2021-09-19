@@ -81,8 +81,11 @@ func (c *gpxCollector) Serve(ctx context.Context) error {
 
 			switch sent.DataType() {
 			case nmea.TypeRMC:
-				rmcTimeout.Reset(rmcTimeoutInterval)
 				rmc := sent.(nmea.RMC)
+				if rmc.Latitude == 0 && rmc.Longitude == 0 {
+					continue
+				}
+				rmcTimeout.Reset(rmcTimeoutInterval)
 				when := time.Date(rmc.Date.YY+2000, time.Month(rmc.Date.MM), rmc.Date.DD, rmc.Time.Hour, rmc.Time.Minute, rmc.Time.Second, rmc.Time.Millisecond*int(time.Millisecond), time.UTC)
 				if c.w.Sample(rmc.Latitude, rmc.Longitude, when, c.i.GPXExtensions()) {
 					gpxPositionsRecorded.Inc()
