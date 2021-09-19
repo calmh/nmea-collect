@@ -166,14 +166,17 @@ func (r *lineWriter) Serve(ctx context.Context) error {
 		}
 	}
 
-	return sc.Err()
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	return io.EOF
 }
 
 func linesInto(c chan<- string, r io.ReadCloser, name string) *lineWriter {
 	return &lineWriter{
 		reader: func() (io.ReadCloser, error) { return r, nil },
 		name:   name,
-		lines:  make(chan string, 1),
+		lines:  c,
 	}
 }
 
