@@ -51,12 +51,18 @@ func (r *rawCollector) String() string {
 }
 
 func (r *rawCollector) Serve(ctx context.Context) error {
-	var fd io.WriteCloser
+	var fd interface {
+		io.WriteCloser
+		Flusher
+	}
 	defer func() {
 		if fd != nil {
 			fd.Close()
 		}
 	}()
+
+	flusher := time.NewTicker(5 * time.Minute)
+	defer flusher.Stop()
 
 	var lastZDA time.Time
 	var day time.Time
@@ -80,10 +86,10 @@ func (r *rawCollector) Serve(ctx context.Context) error {
 				if r.compress {
 					gw := gzip.NewWriter(nfd)
 					bw := bufio.NewWriterSize(gw, r.bufSize)
-					fd = &bufWriter{Writer: bw, flusher: bw, closers: []io.Closer{gw, nfd}}
+					fd = &bufWriter{Writer: bw, Flusher: multiFlusher{bw, gw}, closers: []io.Closer{gw, nfd}}
 				} else {
 					bw := bufio.NewWriterSize(nfd, r.bufSize)
-					fd = &bufWriter{Writer: bw, flusher: bw, closers: []io.Closer{nfd}}
+					fd = &bufWriter{Writer: bw, Flusher: bw, closers: []io.Closer{nfd}}
 				}
 				day = truncDay
 				rawFilesCreated.Inc()
@@ -98,20 +104,38 @@ func (r *rawCollector) Serve(ctx context.Context) error {
 			fmt.Fprintf(fd, "%s\r\n", line)
 			rawMessagesRecorded.Inc()
 
+		case <-flusher.C:
+			if fd != nil {
+				fd.Flush()
+			}
+
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 }
 
+type Flusher interface{ Flush() error }
+
+type multiFlusher []Flusher
+
+func (f multiFlusher) Flush() error {
+	for _, flusher := range f {
+		if err := flusher.Flush(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type bufWriter struct {
 	io.Writer
-	flusher interface{ Flush() error }
+	Flusher
 	closers []io.Closer
 }
 
 func (w *bufWriter) Close() error {
-	w.flusher.Flush()
+	w.Flusher.Flush()
 	for _, c := range w.closers {
 		_ = c.Close()
 	}
