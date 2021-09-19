@@ -81,7 +81,10 @@ func main() {
 		log.Println("Reading NMEA from serial device", dev)
 		sup.Add(readSerialInto(input, dev))
 		if cli.InputSerialVoltage {
-			sup.Add(&srtAISProber{dev})
+			sup.Add(&srtAISProber{
+				dev:      dev,
+				interval: time.Minute,
+			})
 		}
 	}
 
