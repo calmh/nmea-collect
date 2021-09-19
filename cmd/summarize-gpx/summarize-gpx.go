@@ -9,16 +9,47 @@ import (
 	"os"
 	"sort"
 	"time"
+
+	"github.com/alecthomas/kong"
 )
 
-func main() {
-	points, err := points(os.Stdin)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+var cli struct {
+	Files             []string `arg:""`
+	DeleteShorterThan float64  `placeholder:"DIST"`
+	DeleteErrored     bool
+}
 
-	summarize(os.Stdout, points)
+func main() {
+	kong.Parse(&cli)
+
+	for _, f := range cli.Files {
+		fd, err := os.Open(f)
+		if err != nil {
+			fmt.Printf("%s: %v\n", f, err)
+			continue
+		}
+		points, err := points(fd)
+		if err != nil {
+			fd.Close()
+			fmt.Printf("%s: %v\n", f, err)
+			if cli.DeleteErrored {
+				os.Remove(f)
+			}
+			continue
+		}
+		fd.Close()
+
+		sum := summarize(points)
+		if cli.DeleteShorterThan > 0 && sum.tripDistance < cli.DeleteShorterThan {
+			fmt.Printf("%s: empty\n", f)
+			os.Remove(f)
+			continue
+		}
+
+		fmt.Printf("%s\n", f)
+		printSummary(os.Stdout, sum)
+		fmt.Printf("\n")
+	}
 }
 
 type gpx struct {
@@ -73,36 +104,55 @@ func points(r io.Reader) ([][]gpxTrkPoint, error) {
 	return points, nil
 }
 
-func summarize(w io.Writer, tracks [][]gpxTrkPoint) {
-	var sog, windSpeed, waterSpeed metric
+func summarize(tracks [][]gpxTrkPoint) summary {
+	var s summary
 
 	for _, points := range tracks {
 		start := points[0]
 		last := points[len(points)-1]
-		td := last.Time.Sub(start.Time)
 
-		fmt.Fprintf(w, "Start: %v\nEnd:   %v\nDuration: %s\n", start.Time.Local(), last.Time.Local(), td.Round(time.Minute))
+		if s.start.IsZero() || s.start.After(start.Time) {
+			s.start = start.Time
+		}
+		if s.end.IsZero() || s.end.Before(last.Time) {
+			s.end = last.Time
+		}
+		s.duration += last.Time.Sub(start.Time)
 
 		var prev *gpxTrkPoint
-		var tripDistance float64
 		for i, p := range points {
 			if prev != nil {
 				td := p.Time.Sub(prev.Time)
 				dist := distance(*prev, p)
-				tripDistance += dist
-				sog.record(dist/td.Hours(), td)
-				windSpeed.record(p.Extensions.Named("windspeed").Value*3600/1852, td)
-				waterSpeed.record(p.Extensions.Named("waterspeed").Value, td)
+				s.tripDistance += dist
+				s.sog.record(dist/td.Hours(), td)
+				s.windSpeed.record(p.Extensions.Named("windspeed").Value*3600/1852, td)
+				s.waterSpeed.record(p.Extensions.Named("waterspeed").Value, td)
 			}
 			prev = &points[i]
 		}
-
-		fmt.Fprintf(w, "Distance: %.1f NM\n---\n", tripDistance)
 	}
 
-	fmt.Fprintf(w, "SOG: %.1f kt avg (med %.1f kt, max %.1f kt)\n", sog.avg(), sog.med(), sog.max)
-	fmt.Fprintf(w, "STW: %.1f kt avg (med %.1f kt, max %.1f kt)\n", waterSpeed.avg(), waterSpeed.med(), waterSpeed.max)
-	fmt.Fprintf(w, "Wind: %.1f kt avg (%.1f kt med, %.1f kt min, %.1f kt max)\n", windSpeed.avg(), windSpeed.med(), windSpeed.min, windSpeed.max)
+	return s
+}
+
+func printSummary(w io.Writer, s summary) {
+	fmt.Fprintf(w, "Start: %v\nEnd:   %v\nDuration: %s\n", s.start.Local(), s.end.Local(), s.duration.Round(time.Minute))
+	fmt.Fprintf(w, "Distance: %.01f nm\n", s.tripDistance)
+
+	fmt.Fprintf(w, "SOG: %.1f kt avg (med %.1f kt, max %.1f kt)\n", s.sog.avg(), s.sog.med(), s.sog.max)
+	fmt.Fprintf(w, "STW: %.1f kt avg (med %.1f kt, max %.1f kt)\n", s.waterSpeed.avg(), s.waterSpeed.med(), s.waterSpeed.max)
+	fmt.Fprintf(w, "Wind: %.1f kt avg (%.1f kt med, %.1f kt min, %.1f kt max)\n", s.windSpeed.avg(), s.windSpeed.med(), s.windSpeed.min, s.windSpeed.max)
+}
+
+type summary struct {
+	start        time.Time
+	end          time.Time
+	duration     time.Duration
+	sog          metric
+	windSpeed    metric
+	waterSpeed   metric
+	tripDistance float64
 }
 
 type metric struct {
