@@ -60,6 +60,10 @@ func (c *gpxCollector) Serve(ctx context.Context) error {
 	exts := make(gpx.Extensions)
 	defer c.w.Flush()
 
+	const rmcTimeoutInterval = 5 * time.Minute
+	rmcTimeout := time.NewTimer(rmcTimeoutInterval)
+	defer rmcTimeout.Stop()
+
 	for {
 		select {
 		case line := <-c.c:
@@ -103,6 +107,7 @@ func (c *gpxCollector) Serve(ctx context.Context) error {
 				exts.Set("waterspeed", fmt.Sprintf("%.01f", vhw.SpeedThroughWaterKnots))
 
 			case nmea.TypeRMC:
+				rmcTimeout.Reset(rmcTimeoutInterval)
 				rmc := sent.(nmea.RMC)
 				when := time.Date(rmc.Date.YY+2000, time.Month(rmc.Date.MM), rmc.Date.DD, rmc.Time.Hour, rmc.Time.Minute, rmc.Time.Second, rmc.Time.Millisecond*int(time.Millisecond), time.UTC)
 				if c.w.Sample(rmc.Latitude, rmc.Longitude, when, exts) {
@@ -110,6 +115,9 @@ func (c *gpxCollector) Serve(ctx context.Context) error {
 				}
 				gpxPositionsSampled.Inc()
 			}
+
+		case <-rmcTimeout.C:
+			c.w.Flush()
 
 		case <-ctx.Done():
 			return ctx.Err()
