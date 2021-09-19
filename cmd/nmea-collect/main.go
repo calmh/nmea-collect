@@ -115,10 +115,11 @@ func main() {
 		sup.Add(forwardTCP(ais.Output(), cli.ForwardAISTCPListen))
 	}
 
+	instruments := &instrumentsCollector{c: tee.Output()}
+	sup.Add(instruments)
 	if cli.PrometheusMetricsListen != "" {
 		url := &url.URL{Scheme: "http", Host: cli.PrometheusMetricsListen, Path: "/metrics"}
 		log.Println("Exporting instruments and metrics on", url)
-		sup.Add(&instrumentsCollector{tee.Output()})
 		sup.Add(&prometheusListener{cli.PrometheusMetricsListen})
 	}
 
@@ -141,7 +142,7 @@ func main() {
 		log.Println("Collecting GPX tracks to files named like", cli.OutputGPXPattern)
 		nonAIS := NewFilteredTee("non-AIS", tee.Output(), "$")
 		sup.Add(nonAIS)
-		sup.Add(collectGPX(nonAIS.Output(), gpx))
+		sup.Add(collectGPX(nonAIS.Output(), gpx, instruments))
 	}
 
 	log.Fatal(sup.Serve(context.Background()))

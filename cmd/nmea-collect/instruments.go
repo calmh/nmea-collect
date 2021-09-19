@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	nmea "github.com/adrianmo/go-nmea"
+	"github.com/calmh/nmea-collect/gpx"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -61,7 +63,9 @@ var (
 )
 
 type instrumentsCollector struct {
-	c <-chan string
+	c      <-chan string
+	exts   gpx.Extensions
+	extMut sync.Mutex
 }
 
 func (l *instrumentsCollector) String() string {
@@ -74,6 +78,10 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 	defer instrumentTimeout.Stop()
 	positionTimeout := time.NewTimer(instrumentRetention)
 	defer positionTimeout.Stop()
+
+	l.extMut.Lock()
+	l.exts = make(gpx.Extensions)
+	l.extMut.Unlock()
 
 	for {
 		select {
@@ -88,16 +96,25 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 				dpt := sent.(DPT)
 				waterDepth.Set(dpt.Depth)
 				instrumentTimeout.Reset(instrumentRetention)
+				l.extMut.Lock()
+				l.exts.Set("waterdepth", fmt.Sprintf("%.01f", dpt.Depth))
+				l.extMut.Unlock()
 
 			case TypeHDG:
 				hdg := sent.(HDG)
 				heading.Set(hdg.Heading)
 				instrumentTimeout.Reset(instrumentRetention)
+				l.extMut.Lock()
+				l.exts.Set("heading", fmt.Sprintf("%.0f", hdg.Heading))
+				l.extMut.Unlock()
 
 			case TypeMTW:
 				mtw := sent.(MTW)
 				waterTemp.Set(mtw.Temperature)
 				instrumentTimeout.Reset(instrumentRetention)
+				l.extMut.Lock()
+				l.exts.Set("watertemp", fmt.Sprintf("%.01f", mtw.Temperature))
+				l.extMut.Unlock()
 
 			case TypeMWV:
 				mwv := sent.(MWV)
@@ -105,17 +122,27 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 					windAngle.Set(mwv.Angle)
 					windSpeed.Set(mwv.Speed)
 					instrumentTimeout.Reset(instrumentRetention)
+					l.extMut.Lock()
+					l.exts.Set("windangle", fmt.Sprintf("%.0f", mwv.Angle))
+					l.exts.Set("windspeed", fmt.Sprintf("%.01f", mwv.Speed))
+					l.extMut.Unlock()
 				}
 
 			case TypeVLW:
 				mwv := sent.(VLW)
 				logDistance.Set(mwv.TotalDistanceNauticalMiles)
 				instrumentTimeout.Reset(instrumentRetention)
+				l.extMut.Lock()
+				l.exts.Set("log", fmt.Sprintf("%.1f", mwv.TotalDistanceNauticalMiles))
+				l.extMut.Unlock()
 
 			case nmea.TypeVHW:
 				vhw := sent.(nmea.VHW)
 				logSpeed.Set(vhw.SpeedThroughWaterKnots)
 				instrumentTimeout.Reset(instrumentRetention)
+				l.extMut.Lock()
+				l.exts.Set("waterspeed", fmt.Sprintf("%.01f", vhw.SpeedThroughWaterKnots))
+				l.extMut.Unlock()
 
 			case nmea.TypeRMC:
 				rmc := sent.(nmea.RMC)
@@ -126,6 +153,9 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 			case TypeSMT:
 				rmc := sent.(SMT)
 				voltage.Set(rmc.SupplyVoltage)
+				l.extMut.Lock()
+				l.exts.Set("supplyvoltage", fmt.Sprintf("%.01f", rmc.SupplyVoltage))
+				l.extMut.Unlock()
 			}
 
 		case <-instrumentTimeout.C:
@@ -145,6 +175,16 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+}
+
+func (i *instrumentsCollector) GPXExtensions() gpx.Extensions {
+	i.extMut.Lock()
+	defer i.extMut.Unlock()
+	copy := make(gpx.Extensions, len(i.exts))
+	for k, v := range i.exts {
+		copy[k] = v
+	}
+	return copy
 }
 
 type prometheusListener struct {

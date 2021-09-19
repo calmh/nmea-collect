@@ -43,12 +43,14 @@ var (
 type gpxCollector struct {
 	c <-chan string
 	w *gpx.AutoGPX
+	i *instrumentsCollector
 }
 
-func collectGPX(c <-chan string, w *gpx.AutoGPX) *gpxCollector {
+func collectGPX(c <-chan string, w *gpx.AutoGPX, i *instrumentsCollector) *gpxCollector {
 	return &gpxCollector{
 		c: c,
 		w: w,
+		i: i,
 	}
 }
 
@@ -57,7 +59,6 @@ func (c *gpxCollector) String() string {
 }
 
 func (c *gpxCollector) Serve(ctx context.Context) error {
-	exts := make(gpx.Extensions)
 	defer c.w.Flush()
 
 	const rmcTimeoutInterval = 5 * time.Minute
@@ -79,38 +80,11 @@ func (c *gpxCollector) Serve(ctx context.Context) error {
 			}
 
 			switch sent.DataType() {
-			case TypeDPT:
-				dpt := sent.(DPT)
-				exts.Set("waterdepth", fmt.Sprintf("%.01f", dpt.Depth))
-
-			case TypeHDG:
-				hdg := sent.(HDG)
-				exts.Set("heading", fmt.Sprintf("%.0f", hdg.Heading))
-
-			case TypeMTW:
-				mtw := sent.(MTW)
-				exts.Set("watertemp", fmt.Sprintf("%.01f", mtw.Temperature))
-
-			case TypeMWV:
-				mwv := sent.(MWV)
-				if mwv.Reference == "R" && mwv.Status == "A" {
-					exts.Set("windangle", fmt.Sprintf("%.0f", mwv.Angle))
-					exts.Set("windspeed", fmt.Sprintf("%.01f", mwv.Speed))
-				}
-
-			case TypeVLW:
-				mwv := sent.(VLW)
-				exts.Set("log", fmt.Sprintf("%.1f", mwv.TotalDistanceNauticalMiles))
-
-			case nmea.TypeVHW:
-				vhw := sent.(nmea.VHW)
-				exts.Set("waterspeed", fmt.Sprintf("%.01f", vhw.SpeedThroughWaterKnots))
-
 			case nmea.TypeRMC:
 				rmcTimeout.Reset(rmcTimeoutInterval)
 				rmc := sent.(nmea.RMC)
 				when := time.Date(rmc.Date.YY+2000, time.Month(rmc.Date.MM), rmc.Date.DD, rmc.Time.Hour, rmc.Time.Minute, rmc.Time.Second, rmc.Time.Millisecond*int(time.Millisecond), time.UTC)
-				if c.w.Sample(rmc.Latitude, rmc.Longitude, when, exts) {
+				if c.w.Sample(rmc.Latitude, rmc.Longitude, when, c.i.GPXExtensions()) {
 					gpxPositionsRecorded.Inc()
 				}
 				gpxPositionsSampled.Inc()
