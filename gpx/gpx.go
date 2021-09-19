@@ -16,7 +16,7 @@ const (
 )
 
 type AutoGPX struct {
-	Opener                func() (io.WriteCloser, error)
+	Opener                func(time.Time) (io.WriteCloser, error)
 	SampleInterval        time.Duration
 	TriggerDistanceMeters float64
 	TriggerTimeWindow     time.Duration
@@ -63,7 +63,7 @@ func (g *AutoGPX) Sample(lat, lon float64, when time.Time, extensions Extensions
 		// Check if we've moved far enough to start recording.
 		d := distance(g.samples[0], s)
 		if d > g.TriggerDistanceMeters {
-			g.startRecording()
+			g.startRecording(when)
 		}
 
 		return true
@@ -94,8 +94,8 @@ func (g *AutoGPX) Flush() error {
 	return nil
 }
 
-func (g *AutoGPX) startRecording() {
-	fd, err := g.Opener()
+func (g *AutoGPX) startRecording(t time.Time) {
+	fd, err := g.Opener(t)
 	if err != nil {
 		log.Println("Opening file:", err)
 		return

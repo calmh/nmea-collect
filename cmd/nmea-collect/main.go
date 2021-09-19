@@ -133,8 +133,8 @@ func main() {
 
 	if cli.OutputGPXPattern != "" {
 		gpx := &gpx.AutoGPX{
-			Opener: func() (io.WriteCloser, error) {
-				return newGPXFile(cli.OutputGPXPattern)
+			Opener: func(t time.Time) (io.WriteCloser, error) {
+				return newGPXFile(cli.OutputGPXPattern, t)
 			},
 			SampleInterval:        cli.OutputGPXSampleInterval,
 			TriggerDistanceMeters: cli.OutputGPXMovingDistance,
@@ -157,8 +157,8 @@ var gpxFilesCreatedTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Name:      "files_created_total",
 })
 
-func newGPXFile(pattern string) (io.WriteCloser, error) {
-	name := time.Now().UTC().Format(pattern)
+func newGPXFile(pattern string, t time.Time) (io.WriteCloser, error) {
+	name := t.UTC().Format(pattern)
 	log.Println("Creating new GPX track", name)
 	gpxFilesCreatedTotal.Inc()
 	return os.Create(name)
