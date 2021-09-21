@@ -60,6 +60,11 @@ var (
 		Subsystem: "ais",
 		Name:      "supply_voltage",
 	})
+	airTemp = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "nmea",
+		Subsystem: "instruments",
+		Name:      "air_temperature_c",
+	})
 )
 
 type instrumentsCollector struct {
@@ -151,11 +156,20 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 				positionTimeout.Reset(instrumentRetention)
 
 			case TypeSMT:
-				rmc := sent.(SMT)
-				voltage.Set(rmc.SupplyVoltage)
+				smt := sent.(SMT)
+				voltage.Set(smt.SupplyVoltage)
 				l.extMut.Lock()
-				l.exts.Set("supplyvoltage", fmt.Sprintf("%.01f", rmc.SupplyVoltage))
+				l.exts.Set("supplyvoltage", fmt.Sprintf("%.01f", smt.SupplyVoltage))
 				l.extMut.Unlock()
+
+			case TypeXDR:
+				xdr := sent.(XDR)
+				if xdr.TransducerType == "C" && xdr.Name == "Air" {
+					airTemp.Set(xdr.Measurement)
+					l.extMut.Lock()
+					l.exts.Set("airtemperature", fmt.Sprintf("%.01f", xdr.Measurement))
+					l.extMut.Unlock()
+				}
 			}
 
 		case <-instrumentTimeout.C:

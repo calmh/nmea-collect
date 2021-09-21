@@ -12,6 +12,7 @@ const (
 	TypeMWV = "MWV"
 	TypeVLW = "VLW"
 	TypeSMT = "SMT"
+	TypeXDR = "XDR"
 )
 
 var parsers = map[string]nmea.ParserFunc{
@@ -21,6 +22,7 @@ var parsers = map[string]nmea.ParserFunc{
 	TypeMWV: parseMWV,
 	TypeVLW: parseVLW,
 	TypeSMT: parseSMT,
+	TypeXDR: parseXDR,
 }
 
 // Mean Temperature of Water
@@ -139,6 +141,29 @@ func parseSMT(s nmea.BaseSentence) (nmea.Sentence, error) {
 	m := SMT{
 		BaseSentence:  s,
 		SupplyVoltage: p.Float64(3, "voltage") / 1000,
+	}
+	return m, p.Err()
+}
+
+//  Transducer reading
+
+type XDR struct {
+	nmea.BaseSentence
+	TransducerType string
+	Measurement    float64
+	Unit           string
+	Name           string
+}
+
+func parseXDR(s nmea.BaseSentence) (nmea.Sentence, error) {
+	p := nmea.NewParser(s)
+	p.AssertType(TypeXDR)
+	m := XDR{
+		BaseSentence:   s,
+		TransducerType: p.String(0, "transducer type"),
+		Measurement:    p.Float64(1, "measurement"),
+		Unit:           p.String(2, "unit"),
+		Name:           p.String(3, "name"),
 	}
 	return m, p.Err()
 }
