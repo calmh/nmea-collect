@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -39,6 +40,21 @@ var (
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "apparent_wind_speed_mps",
+	})
+	windSpeedMed = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "nmea",
+		Subsystem: "instruments",
+		Name:      "apparent_wind_speed_median_mps",
+	})
+	windSpeedMax = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "nmea",
+		Subsystem: "instruments",
+		Name:      "apparent_wind_speed_max_mps",
+	})
+	windSpeedMin = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "nmea",
+		Subsystem: "instruments",
+		Name:      "apparent_wind_speed_min_mps",
 	})
 	logDistance = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
@@ -88,6 +104,9 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 	l.exts = make(gpx.Extensions)
 	l.extMut.Unlock()
 
+	var windspeed measurement
+	windspeedSwitched := time.Now()
+
 	for {
 		select {
 		case line := <-l.c:
@@ -127,6 +146,18 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 					windAngle.Set(mwv.Angle)
 					windSpeed.Set(mwv.Speed)
 					instrumentTimeout.Reset(instrumentRetention)
+
+					period := time.Now().Truncate(time.Minute)
+					if !period.Equal(windspeedSwitched) {
+						windspeed.Finalize()
+						windSpeedMax.Set(windspeed.Max())
+						windSpeedMed.Set(windspeed.Median())
+						windSpeedMin.Set(windspeed.Min())
+						windspeed.Reset()
+						windspeedSwitched = period
+					}
+					windspeed.Observe(mwv.Speed)
+
 					l.extMut.Lock()
 					l.exts.Set("windangle", fmt.Sprintf("%.0f", mwv.Angle))
 					l.exts.Set("windspeed", fmt.Sprintf("%.01f", mwv.Speed))
@@ -213,4 +244,39 @@ func (l *prometheusListener) Serve(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.Handle("/", promhttp.Handler())
 	return http.ListenAndServe(l.addr, mux)
+}
+
+type measurement []float64
+
+func (m *measurement) Observe(v float64) {
+	*m = append(*m, v)
+}
+
+func (m *measurement) Reset() {
+	*m = (*m)[:0]
+}
+
+func (m *measurement) Finalize() {
+	sort.Float64s(*m)
+}
+
+func (m *measurement) Median() float64 {
+	if len(*m) == 0 {
+		return 0
+	}
+	return (*m)[len(*m)/2]
+}
+
+func (m *measurement) Max() float64 {
+	if len(*m) == 0 {
+		return 0
+	}
+	return (*m)[len(*m)-1]
+}
+
+func (m *measurement) Min() float64 {
+	if len(*m) == 0 {
+		return 0
+	}
+	return (*m)[0]
 }
