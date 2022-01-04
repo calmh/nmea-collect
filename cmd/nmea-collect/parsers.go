@@ -149,8 +149,12 @@ func parseSMT(s nmea.BaseSentence) (nmea.Sentence, error) {
 
 type XDR struct {
 	nmea.BaseSentence
+	Measurements []XDRMeasurement
+}
+
+type XDRMeasurement struct {
 	TransducerType string
-	Measurement    float64
+	Value          float64
 	Unit           string
 	Name           string
 }
@@ -159,12 +163,18 @@ func parseXDR(s nmea.BaseSentence) (nmea.Sentence, error) {
 	p := nmea.NewParser(s)
 	p.AssertType(TypeXDR)
 	m := XDR{
-		BaseSentence:   s,
-		TransducerType: p.String(0, "transducer type"),
-		Measurement:    p.Float64(1, "measurement"),
-		Unit:           p.String(2, "unit"),
-		Name:           p.String(3, "name"),
+		BaseSentence: s,
 	}
+
+	for i := 0; i < len(p.Fields); i += 4 {
+		m.Measurements = append(m.Measurements, XDRMeasurement{
+			TransducerType: p.String(i+0, "transducer type"),
+			Value:          p.Float64(i+1, "measurement"),
+			Unit:           p.String(i+2, "unit"),
+			Name:           p.String(i+3, "name"),
+		})
+	}
+
 	return m, p.Err()
 }
 

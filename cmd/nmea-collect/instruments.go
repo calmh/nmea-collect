@@ -81,6 +81,16 @@ var (
 		Subsystem: "instruments",
 		Name:      "air_temperature_c",
 	})
+	insideTemp = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "nmea",
+		Subsystem: "instruments",
+		Name:      "inside_temperature_c",
+	})
+	baroPressure = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "nmea",
+		Subsystem: "instruments",
+		Name:      "barometric_pressure_mb",
+	})
 )
 
 type instrumentsCollector struct {
@@ -195,11 +205,24 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 
 			case TypeXDR:
 				xdr := sent.(XDR)
-				if xdr.TransducerType == "C" && xdr.Name == "Air" {
-					airTemp.Set(xdr.Measurement)
-					l.extMut.Lock()
-					l.exts.Set("airtemperature", fmt.Sprintf("%.01f", xdr.Measurement))
-					l.extMut.Unlock()
+				for _, m := range xdr.Measurements {
+					if m.TransducerType == "C" && m.Name == "Air" {
+						airTemp.Set(m.Value)
+						l.extMut.Lock()
+						l.exts.Set("airtemperature", fmt.Sprintf("%.01f", m.Value))
+						l.extMut.Unlock()
+					} else if m.TransducerType == "C" && m.Name == "ENV_INSIDE_T" {
+						insideTemp.Set(m.Value)
+						l.extMut.Lock()
+						l.exts.Set("insidetemperature", fmt.Sprintf("%.01f", m.Value))
+						l.extMut.Unlock()
+					} else if m.TransducerType == "P" && m.Name == "Baro" {
+						m.Value /= 100.0
+						baroPressure.Set(m.Value)
+						l.extMut.Lock()
+						l.exts.Set("baropressure", fmt.Sprintf("%.01f", m.Value))
+						l.extMut.Unlock()
+					}
 				}
 			}
 

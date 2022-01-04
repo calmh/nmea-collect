@@ -17,12 +17,21 @@ func TestParseAIS(t *testing.T) {
 }
 
 func TestParseXDR(t *testing.T) {
-	sent, err := nmea.Parse(`$YDXDR,C,14.3,C,Air*11`)
+	sent, err := nmea.Parse(`$YDXDR,C,4.4,C,Air,P,98950,P,Baro,C,5.4,C,ENV_INSIDE_T*1E`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	xdr := sent.(XDR)
-	if xdr.Measurement != 14.3 {
-		t.Error("bad temperature", xdr.Measurement)
+	if len(xdr.Measurements) != 3 {
+		t.Fatal("expected 3 measurements")
+	}
+	if xdr.Measurements[0].Value != 4.4 {
+		t.Error("bad temperature 2", xdr.Measurements[0].Value)
+	}
+	if xdr.Measurements[1].Value != 98950 {
+		t.Error("bad pressure", xdr.Measurements[1].Value)
+	}
+	if xdr.Measurements[2].Value != 5.4 {
+		t.Error("bad temperature 2", xdr.Measurements[2].Value)
 	}
 }
