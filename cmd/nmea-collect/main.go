@@ -120,6 +120,10 @@ func main() {
 
 	instruments := &instrumentsCollector{c: tee.Output()}
 	sup.Add(instruments)
+
+	aisCounter := &aisContactsCounter{c: tee.Output()}
+	sup.Add(aisCounter)
+
 	if cli.PrometheusMetricsListen != "" {
 		url := &url.URL{Scheme: "http", Host: cli.PrometheusMetricsListen, Path: "/metrics"}
 		log.Println("Exporting instruments and metrics on", url)
