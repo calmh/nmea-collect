@@ -11,86 +11,86 @@ import (
 	nmea "github.com/adrianmo/go-nmea"
 	"github.com/calmh/nmea-collect/gpx"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
-	waterDepth = promauto.NewGauge(prometheus.GaugeOpts{
+	waterDepth = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "water_depth_m",
-	})
-	heading = promauto.NewGauge(prometheus.GaugeOpts{
+	}))
+	heading = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "compass_heading",
-	})
-	waterTemp = promauto.NewGauge(prometheus.GaugeOpts{
+	}))
+	waterTemp = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "water_temperature_c",
-	})
-	windAngle = promauto.NewGauge(prometheus.GaugeOpts{
+	}))
+	windAngle = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "apparent_wind_angle",
-	})
-	windSpeed = promauto.NewGauge(prometheus.GaugeOpts{
+	}))
+	windSpeed = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "apparent_wind_speed_mps",
-	})
-	windSpeedMed = promauto.NewGauge(prometheus.GaugeOpts{
+	}))
+	windSpeedMed = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "apparent_wind_speed_median_mps",
-	})
-	windSpeedMax = promauto.NewGauge(prometheus.GaugeOpts{
+	}))
+	windSpeedMax = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "apparent_wind_speed_max_mps",
-	})
-	windSpeedMin = promauto.NewGauge(prometheus.GaugeOpts{
+	}))
+	windSpeedMin = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "apparent_wind_speed_min_mps",
-	})
-	logDistance = promauto.NewGauge(prometheus.GaugeOpts{
+	}))
+	logDistance = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "total_log_distance_nm",
-	})
-	logSpeed = promauto.NewGauge(prometheus.GaugeOpts{
+	}))
+	logSpeed = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "water_speed_kn",
-	})
-	position = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	}))
+	voltage = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: "nmea",
+		Subsystem: "ais",
+		Name:      "supply_voltage",
+	}))
+	airTemp = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: "nmea",
+		Subsystem: "instruments",
+		Name:      "air_temperature_c",
+	}))
+	insideTemp = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: "nmea",
+		Subsystem: "instruments",
+		Name:      "inside_temperature_c",
+	}))
+	baroPressure = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: "nmea",
+		Subsystem: "instruments",
+		Name:      "barometric_pressure_mb",
+	}))
+
+	position = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "gps_position",
 	}, []string{"axis"})
-	voltage = promauto.NewGauge(prometheus.GaugeOpts{
-		Namespace: "nmea",
-		Subsystem: "ais",
-		Name:      "supply_voltage",
-	})
-	airTemp = promauto.NewGauge(prometheus.GaugeOpts{
-		Namespace: "nmea",
-		Subsystem: "instruments",
-		Name:      "air_temperature_c",
-	})
-	insideTemp = promauto.NewGauge(prometheus.GaugeOpts{
-		Namespace: "nmea",
-		Subsystem: "instruments",
-		Name:      "inside_temperature_c",
-	})
-	baroPressure = promauto.NewGauge(prometheus.GaugeOpts{
-		Namespace: "nmea",
-		Subsystem: "instruments",
-		Name:      "barometric_pressure_mb",
-	})
 )
 
 type instrumentsCollector struct {
@@ -105,8 +105,6 @@ func (l *instrumentsCollector) String() string {
 
 func (l *instrumentsCollector) Serve(ctx context.Context) error {
 	const instrumentRetention = time.Minute
-	instrumentTimeout := time.NewTimer(instrumentRetention)
-	defer instrumentTimeout.Stop()
 	positionTimeout := time.NewTimer(instrumentRetention)
 	defer positionTimeout.Stop()
 
@@ -129,7 +127,6 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 			case TypeDPT:
 				dpt := sent.(DPT)
 				waterDepth.Set(dpt.Depth)
-				instrumentTimeout.Reset(instrumentRetention)
 				l.extMut.Lock()
 				l.exts.Set("waterdepth", fmt.Sprintf("%.01f", dpt.Depth))
 				l.extMut.Unlock()
@@ -137,7 +134,6 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 			case TypeHDG:
 				hdg := sent.(HDG)
 				heading.Set(hdg.Heading)
-				instrumentTimeout.Reset(instrumentRetention)
 				l.extMut.Lock()
 				l.exts.Set("heading", fmt.Sprintf("%.0f", hdg.Heading))
 				l.extMut.Unlock()
@@ -145,7 +141,6 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 			case TypeMTW:
 				mtw := sent.(MTW)
 				waterTemp.Set(mtw.Temperature)
-				instrumentTimeout.Reset(instrumentRetention)
 				l.extMut.Lock()
 				l.exts.Set("watertemp", fmt.Sprintf("%.01f", mtw.Temperature))
 				l.extMut.Unlock()
@@ -155,7 +150,6 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 				if mwv.Reference == "R" && mwv.Status == "A" {
 					windAngle.Set(mwv.Angle)
 					windSpeed.Set(mwv.Speed)
-					instrumentTimeout.Reset(instrumentRetention)
 
 					period := time.Now().Truncate(time.Minute)
 					if !period.Equal(windspeedSwitched) {
@@ -177,7 +171,6 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 			case TypeVLW:
 				mwv := sent.(VLW)
 				logDistance.Set(mwv.TotalDistanceNauticalMiles)
-				instrumentTimeout.Reset(instrumentRetention)
 				l.extMut.Lock()
 				l.exts.Set("log", fmt.Sprintf("%.1f", mwv.TotalDistanceNauticalMiles))
 				l.extMut.Unlock()
@@ -185,7 +178,6 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 			case nmea.TypeVHW:
 				vhw := sent.(nmea.VHW)
 				logSpeed.Set(vhw.SpeedThroughWaterKnots)
-				instrumentTimeout.Reset(instrumentRetention)
 				l.extMut.Lock()
 				l.exts.Set("waterspeed", fmt.Sprintf("%.01f", vhw.SpeedThroughWaterKnots))
 				l.extMut.Unlock()
@@ -225,15 +217,6 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 					}
 				}
 			}
-
-		case <-instrumentTimeout.C:
-			waterDepth.Set(0)
-			heading.Set(0)
-			waterTemp.Set(0)
-			windAngle.Set(0)
-			windSpeed.Set(0)
-			logDistance.Set(0)
-			logSpeed.Set(0)
 
 		case <-positionTimeout.C:
 			position.WithLabelValues("lat").Set(0)
@@ -302,4 +285,37 @@ func (m *measurement) Min() float64 {
 		return 0
 	}
 	return (*m)[0]
+}
+
+type liveGauge struct {
+	gauge      prometheus.Gauge
+	mut        sync.Mutex
+	unregister *time.Timer
+}
+
+func newLiveGauge(gauge prometheus.Gauge) *liveGauge {
+	return &liveGauge{
+		gauge: gauge,
+	}
+}
+
+const gaugeLifeTime = 5 * time.Second
+
+func (g *liveGauge) Set(v float64) {
+	g.gauge.Set(v)
+
+	g.mut.Lock()
+	defer g.mut.Unlock()
+
+	if g.unregister == nil {
+		_ = prometheus.Register(g.gauge)
+		g.unregister = time.AfterFunc(gaugeLifeTime, func() {
+			g.mut.Lock()
+			defer g.mut.Unlock()
+			prometheus.Unregister(g.gauge)
+			g.unregister = nil
+		})
+	} else {
+		g.unregister.Reset(gaugeLifeTime)
+	}
 }
