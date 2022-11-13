@@ -112,8 +112,7 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 	l.exts = make(gpx.Extensions)
 	l.extMut.Unlock()
 
-	var windspeed measurement
-	windspeedSwitched := time.Now()
+	windSpeedOverTime := measurement{period: time.Minute}
 
 	for {
 		select {
@@ -151,16 +150,11 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 					windAngle.Set(mwv.Angle)
 					windSpeed.Set(mwv.Speed)
 
-					period := time.Now().Truncate(time.Minute)
-					if !period.Equal(windspeedSwitched) {
-						windspeed.Finalize()
-						windSpeedMax.Set(windspeed.Max())
-						windSpeedMed.Set(windspeed.Median())
-						windSpeedMin.Set(windspeed.Min())
-						windspeed.Reset()
-						windspeedSwitched = period
-					}
-					windspeed.Observe(mwv.Speed)
+					windSpeedOverTime.Observe(mwv.Speed)
+					min, med, max := windSpeedOverTime.MinMedianMax()
+					windSpeedMax.Set(min)
+					windSpeedMed.Set(med)
+					windSpeedMin.Set(max)
 
 					l.extMut.Lock()
 					l.exts.Set("windangle", fmt.Sprintf("%.0f", mwv.Angle))
@@ -252,39 +246,37 @@ func (l *prometheusListener) Serve(ctx context.Context) error {
 	return http.ListenAndServe(l.addr, mux)
 }
 
-type measurement []float64
+type measurement struct {
+	values []value
+	period time.Duration
+}
+
+type value struct {
+	t time.Time
+	v float64
+}
 
 func (m *measurement) Observe(v float64) {
-	*m = append(*m, v)
-}
-
-func (m *measurement) Reset() {
-	*m = (*m)[:0]
-}
-
-func (m *measurement) Finalize() {
-	sort.Float64s(*m)
-}
-
-func (m *measurement) Median() float64 {
-	if len(*m) == 0 {
-		return 0
+	m.values = append(m.values, value{time.Now(), v})
+	for len(m.values) > 0 && time.Since(m.values[0].t) > m.period {
+		m.values = m.values[1:]
 	}
-	return (*m)[len(*m)/2]
+}
+func (m *measurement) sortedValues() []float64 {
+	var values []float64
+	for _, v := range m.values {
+		values = append(values, v.v)
+	}
+	sort.Float64s(values)
+	return values
 }
 
-func (m *measurement) Max() float64 {
-	if len(*m) == 0 {
-		return 0
+func (m *measurement) MinMedianMax() (float64, float64, float64) {
+	values := m.sortedValues()
+	if len(values) == 0 {
+		return 0, 0, 0
 	}
-	return (*m)[len(*m)-1]
-}
-
-func (m *measurement) Min() float64 {
-	if len(*m) == 0 {
-		return 0
-	}
-	return (*m)[0]
+	return values[0], values[len(values)/2], values[len(values)-1]
 }
 
 type liveGauge struct {
