@@ -176,11 +176,13 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 				l.exts.Set("waterspeed", fmt.Sprintf("%.01f", vhw.SpeedThroughWaterKnots))
 				l.extMut.Unlock()
 
-			case nmea.TypeRMC:
-				rmc := sent.(nmea.RMC)
-				position.WithLabelValues("lat").Set(rmc.Latitude)
-				position.WithLabelValues("lon").Set(rmc.Longitude)
-				positionTimeout.Reset(instrumentRetention)
+			case nmea.TypeGLL:
+				rmc := sent.(nmea.GLL)
+				if rmc.Validity == "A" {
+					position.WithLabelValues("lat").Set(rmc.Latitude)
+					position.WithLabelValues("lon").Set(rmc.Longitude)
+					positionTimeout.Reset(instrumentRetention)
+				}
 
 			case TypeSMT:
 				smt := sent.(SMT)
