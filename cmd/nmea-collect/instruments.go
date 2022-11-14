@@ -152,9 +152,9 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 
 					windSpeedOverTime.Observe(mwv.Speed)
 					min, med, max := windSpeedOverTime.MinMedianMax()
-					windSpeedMax.Set(min)
+					windSpeedMin.Set(min)
 					windSpeedMed.Set(med)
-					windSpeedMin.Set(max)
+					windSpeedMax.Set(max)
 
 					l.extMut.Lock()
 					l.exts.Set("windangle", fmt.Sprintf("%.0f", mwv.Angle))
