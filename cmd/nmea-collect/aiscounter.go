@@ -11,6 +11,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+const contactRetention = 5 * time.Minute
+
 var (
 	aisContacts = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "nmea",
@@ -20,7 +22,9 @@ var (
 )
 
 type aisContactsCounter struct {
-	c <-chan string
+	c         <-chan string
+	contactsA map[int32]time.Time
+	contactsB map[int32]time.Time
 }
 
 func (l *aisContactsCounter) String() string {
@@ -28,12 +32,17 @@ func (l *aisContactsCounter) String() string {
 }
 
 func (l *aisContactsCounter) Serve(ctx context.Context) error {
-	const contactRetention = 5 * time.Minute
+	if l.contactsA == nil {
+		l.contactsA = make(map[int32]time.Time)
+	}
+	if l.contactsB == nil {
+		l.contactsB = make(map[int32]time.Time)
+	}
 
-	contactsA := make(map[int32]time.Time)
-	contactsB := make(map[int32]time.Time)
+	accountTicker := time.NewTicker(time.Minute)
+	defer accountTicker.Stop()
+
 	dec := ais.CodecNew(false, false)
-
 	for {
 		select {
 		case line := <-l.c:
@@ -58,25 +67,32 @@ func (l *aisContactsCounter) Serve(ctx context.Context) error {
 			hdr := pkt.GetHeader()
 			switch hdr.MessageID {
 			case 1, 2, 3: // Class A position report
-				contactsA[int32(hdr.UserID)] = time.Now()
-				for k, v := range contactsA {
-					if time.Since(v) > contactRetention {
-						delete(contactsA, k)
-					}
-				}
-				aisContacts.WithLabelValues("A").Set(float64(len(contactsA)))
+				l.contactsA[int32(hdr.UserID)] = time.Now()
 			case 18: // Class B position report
-				contactsB[int32(hdr.UserID)] = time.Now()
-				for k, v := range contactsB {
-					if time.Since(v) > contactRetention {
-						delete(contactsB, k)
-					}
-				}
-				aisContacts.WithLabelValues("B").Set(float64(len(contactsB)))
+				l.contactsB[int32(hdr.UserID)] = time.Now()
 			}
+			l.account()
+
+		case <-accountTicker.C:
+			l.account()
 
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
+}
+
+func (l *aisContactsCounter) account() {
+	for k, v := range l.contactsA {
+		if time.Since(v) > contactRetention {
+			delete(l.contactsA, k)
+		}
+	}
+	aisContacts.WithLabelValues("A").Set(float64(len(l.contactsA)))
+	for k, v := range l.contactsB {
+		if time.Since(v) > contactRetention {
+			delete(l.contactsB, k)
+		}
+	}
+	aisContacts.WithLabelValues("B").Set(float64(len(l.contactsB)))
 }
