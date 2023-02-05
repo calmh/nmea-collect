@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 const (
 	readTimeout  = 1 * time.Minute
 	writeTimeout = 1 * time.Second
+	httpTimeout  = 10 * time.Second
 )
 
 func main() {
@@ -34,11 +37,17 @@ func main() {
 		if err != nil {
 			log.Fatal("Invalid port:", portStr)
 		}
-		forward := &forwarder{
-			srcPort: port,
-			dstAddr: dst,
+		if strings.HasPrefix(dst, "http://") || strings.HasPrefix(dst, "https://") {
+			main.Add(&httpForwarder{
+				srcPort: port,
+				dstAddr: dst,
+			})
+		} else {
+			main.Add(&udpForwarder{
+				srcPort: port,
+				dstAddr: dst,
+			})
 		}
-		main.Add(forward)
 	}
 
 	if err := main.Serve(context.Background()); err != nil {
@@ -46,12 +55,12 @@ func main() {
 	}
 }
 
-type forwarder struct {
+type udpForwarder struct {
 	srcPort int
 	dstAddr string
 }
 
-func (f *forwarder) Serve(ctx context.Context) error {
+func (f *udpForwarder) Serve(ctx context.Context) error {
 	sourceAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", f.srcPort))
 	if err != nil {
 		return fmt.Errorf("resolve source address %s: %w", fmt.Sprintf(":%d", f.srcPort), err)
@@ -90,6 +99,54 @@ func (f *forwarder) Serve(ctx context.Context) error {
 		destConn.SetWriteDeadline(time.Now().Add(writeTimeout))
 		if _, err := destConn.Write(b[0:n]); err != nil {
 			return fmt.Errorf("forward packet: %w", err)
+		}
+	}
+}
+
+type httpForwarder struct {
+	srcPort int
+	dstAddr string
+}
+
+func (f *httpForwarder) Serve(ctx context.Context) error {
+	sourceAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", f.srcPort))
+	if err != nil {
+		return fmt.Errorf("resolve source address %s: %w", fmt.Sprintf(":%d", f.srcPort), err)
+	}
+
+	sourceConn, err := net.ListenUDP("udp", sourceAddr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", sourceAddr, err)
+	}
+	defer sourceConn.Close()
+
+	log.Printf("Proxying UDP %s -> %s", sourceAddr, f.dstAddr)
+	b := make([]byte, 65536)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		sourceConn.SetReadDeadline(time.Now().Add(readTimeout))
+		n, _, err := sourceConn.ReadFromUDP(b)
+		if err != nil {
+			return fmt.Errorf("receive packet: %w", err)
+		}
+
+		ctx, cancel := context.WithDeadline(ctx, time.Now().Add(httpTimeout))
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.dstAddr, bytes.NewReader(b[0:n]))
+		if err != nil {
+			return fmt.Errorf("create HTTP request: %w", err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("forward packet: %w", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("forward packet: %s", resp.Status)
 		}
 	}
 }
