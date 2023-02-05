@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 
@@ -78,6 +79,34 @@ func tcpReader(addr string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("reader: %w", err)
 	}
 	return conn, nil
+}
+
+func readHTTPInto(c chan<- string, port int) *lineWriter {
+	return &lineWriter{
+		reader: func() (io.ReadCloser, error) { return httpReader(port) },
+		name:   fmt.Sprintf("http//:%d", port),
+		lines:  c,
+	}
+}
+
+func httpReader(port int) (io.ReadCloser, error) {
+	rd, wr := io.Pipe()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.Copy(wr, r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	})
+	srv := http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: mux,
+	}
+	go func() {
+		srv.ListenAndServe()
+	}()
+	return rd, nil
 }
 
 func readUDPInto(c chan<- string, port int) *lineWriter {

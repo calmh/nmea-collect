@@ -21,6 +21,7 @@ func main() {
 	var cli struct {
 		InputTCPConnect    []string `help:"TCP connect input addresses (e.g., 172.16.1.2:2000)" placeholder:"ADDR" group:"Input"`
 		InputUDPListen     []int    `help:"UDP broadcast input listen ports (e.g., 2000)" placeholder:"PORT" group:"Input"`
+		InputHTTPListen    []int    `help:"HTTP input listen ports (e.g., 8080)" placeholder:"PORT" group:"Input"`
 		InputSerial        []string `help:"Serial port inputs (e.g., /dev/ttyS0)" placeholder:"DEV" group:"Input"`
 		InputStdin         bool     `help:"Read NMEA from standard input" group:"Input"`
 		InputSerialVoltage bool     `help:"Read supply voltage from serial connected SRT AIS" default:"true"`
@@ -75,6 +76,11 @@ func main() {
 	for _, port := range cli.InputUDPListen {
 		log.Println("Reading NMEA on UDP port", port)
 		sup.Add(readUDPInto(input, port))
+	}
+
+	for _, port := range cli.InputHTTPListen {
+		log.Println("Reading NMEA from HTTP POSTs on port", port)
+		sup.Add(readHTTPInto(input, port))
 	}
 
 	for _, dev := range cli.InputSerial {
