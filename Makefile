@@ -1,4 +1,4 @@
-all:	test bin nmea-collect nmea-collect-linux-arm summarize-gpx
+all:	test bin nmea-collect nmea-collect-linux-arm summarize-gpx udp-proxy-linux-mips
 
 .PHONY: test
 test:
@@ -18,3 +18,7 @@ nmea-collect-linux-arm:
 .PHONY: summarize-gpx
 summarize-gpx:
 	@go build -v -o bin/summarize-gpx ./cmd/summarize-gpx
+
+.PHONY: udp-proxy-linux-mips
+udp-proxy-linux-mips:
+	@GOOS=linux GOARCH=mips GOMIPS=softfloat go build -v -ldflags '-w -s' -o bin/udp-proxy-linux-mips ./cmd/udp-proxy

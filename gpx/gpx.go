@@ -12,7 +12,7 @@ import (
 
 const (
 	Namespace    = "nmc"
-	NamespaceURL = "https://github.com/calmh/nmea-collect/"
+	NamespaceURL = "https://calmh.dev/nmea-collect/"
 )
 
 type AutoGPX struct {

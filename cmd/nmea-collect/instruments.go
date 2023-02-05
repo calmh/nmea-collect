@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"calmh.dev/nmea-collect/gpx"
 	nmea "github.com/adrianmo/go-nmea"
-	"github.com/calmh/nmea-collect/gpx"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -264,6 +264,7 @@ func (m *measurement) Observe(v float64) {
 		m.values = m.values[1:]
 	}
 }
+
 func (m *measurement) sortedValues() []float64 {
 	var values []float64
 	for _, v := range m.values {

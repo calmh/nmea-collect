@@ -1,4 +1,4 @@
-module github.com/calmh/nmea-collect
+module calmh.dev/nmea-collect
 
 go 1.15
 

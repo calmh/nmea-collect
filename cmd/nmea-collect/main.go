@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"calmh.dev/nmea-collect/gpx"
 	nmea "github.com/adrianmo/go-nmea"
 	"github.com/alecthomas/kong"
-	"github.com/calmh/nmea-collect/gpx"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/thejerf/suture/v4"
