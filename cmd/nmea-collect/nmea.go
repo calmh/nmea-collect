@@ -58,7 +58,7 @@ var (
 		Subsystem: "tee",
 		Name:      "messages_filter_skipped_total",
 	}, []string{"tee"})
-	nmeaMessagesTeeDropped = promauto.NewCounterVec(prometheus.CounterOpts{
+	nmeaMessagesTeeDropped = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "nmea",
 		Subsystem: "tee",
 		Name:      "messages_dropped_total",

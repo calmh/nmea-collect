@@ -11,6 +11,7 @@ import (
 	"calmh.dev/nmea-collect/gpx"
 	nmea "github.com/adrianmo/go-nmea"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -86,7 +87,7 @@ var (
 		Name:      "barometric_pressure_mb",
 	}))
 
-	position = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	position = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "nmea",
 		Subsystem: "instruments",
 		Name:      "gps_position",
@@ -107,6 +108,12 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 	const instrumentRetention = time.Minute
 	positionTimeout := time.NewTimer(instrumentRetention)
 	defer positionTimeout.Stop()
+	positionRegistered := false
+	defer func() {
+		if positionRegistered {
+			prometheus.Unregister(position)
+		}
+	}()
 
 	l.extMut.Lock()
 	l.exts = make(gpx.Extensions)
@@ -177,10 +184,14 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 				l.extMut.Unlock()
 
 			case nmea.TypeGLL:
-				rmc := sent.(nmea.GLL)
-				if rmc.Validity == "A" {
-					position.WithLabelValues("lat").Set(rmc.Latitude)
-					position.WithLabelValues("lon").Set(rmc.Longitude)
+				gll := sent.(nmea.GLL)
+				if gll.Validity == "A" {
+					position.WithLabelValues("lat").Set(gll.Latitude)
+					position.WithLabelValues("lon").Set(gll.Longitude)
+					if !positionRegistered {
+						prometheus.Register(position)
+						positionRegistered = true
+					}
 					positionTimeout.Reset(instrumentRetention)
 				}
 
@@ -215,8 +226,10 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 			}
 
 		case <-positionTimeout.C:
-			position.WithLabelValues("lat").Set(0)
-			position.WithLabelValues("lon").Set(0)
+			if positionRegistered {
+				prometheus.Unregister(position)
+				positionRegistered = false
+			}
 
 		case <-ctx.Done():
 			return ctx.Err()
