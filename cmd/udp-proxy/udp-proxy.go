@@ -111,12 +111,12 @@ type httpForwarder struct {
 func (f *httpForwarder) Serve(ctx context.Context) error {
 	sourceAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", f.srcPort))
 	if err != nil {
-		return fmt.Errorf("resolve source address %s: %w", fmt.Sprintf(":%d", f.srcPort), err)
+		return fmt.Errorf("resolve source address %s: %s", fmt.Sprintf(":%d", f.srcPort), err)
 	}
 
 	sourceConn, err := net.ListenUDP("udp", sourceAddr)
 	if err != nil {
-		return fmt.Errorf("listen on %s: %w", sourceAddr, err)
+		return fmt.Errorf("listen on %s: %s", sourceAddr, err)
 	}
 	defer sourceConn.Close()
 
@@ -141,10 +141,14 @@ func (f *httpForwarder) Serve(ctx context.Context) error {
 		default:
 		}
 
-		sourceConn.SetReadDeadline(time.Now().Add(readTimeout))
+		if err := sourceConn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+			return err
+		}
 		n, _, err := sourceConn.ReadFromUDP(b[offset:])
 		if err != nil {
-			return fmt.Errorf("receive packet: %w", err)
+			// Intentionally not a wrap, as Suture does not restart when the
+			// returned error is a (wrapped) context deadline exceeded.
+			return fmt.Errorf("receive packet: %s", err)
 		}
 		offset += n
 
@@ -156,12 +160,12 @@ func (f *httpForwarder) Serve(ctx context.Context) error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.dstAddr, bytes.NewReader(b[:offset]))
 		if err != nil {
 			cancel()
-			return fmt.Errorf("create HTTP request: %w", err)
+			return fmt.Errorf("create HTTP request: %s", err)
 		}
 		resp, err := http.DefaultClient.Do(req)
 		cancel()
 		if err != nil {
-			return fmt.Errorf("forward packet: %w", err)
+			return fmt.Errorf("forward packet: %s", err)
 		}
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
