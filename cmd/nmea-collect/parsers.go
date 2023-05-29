@@ -1,6 +1,10 @@
 package main
 
 import (
+	"encoding/binary"
+	"encoding/hex"
+	"strconv"
+
 	"github.com/adrianmo/go-nmea"
 )
 
@@ -12,6 +16,8 @@ const (
 	TypeVLW = "VLW"
 	TypeSMT = "SMT"
 	TypeXDR = "XDR"
+	// Not sure why the next can't be juse DIN in $PCDIN, but this is how the NMEA parser looks for it.
+	TypeDIN = "CDIN" // http://www.seasmart.net/pdf/SeaSmart_HTTP_Protocol_RevG_043012.pdf
 )
 
 var parsers = map[string]nmea.ParserFunc{
@@ -22,6 +28,7 @@ var parsers = map[string]nmea.ParserFunc{
 	TypeVLW: parseVLW,
 	TypeSMT: parseSMT,
 	TypeXDR: parseXDR,
+	TypeDIN: parseDIN,
 }
 
 // Mean Temperature of Water
@@ -42,7 +49,7 @@ func parseMTW(s nmea.BaseSentence) (nmea.Sentence, error) {
 	return m, p.Err()
 }
 
-//  Heading - Deviation & Variation
+// Heading - Deviation & Variation
 type HDG struct {
 	nmea.BaseSentence
 	Heading            float64
@@ -66,7 +73,7 @@ func parseHDG(s nmea.BaseSentence) (nmea.Sentence, error) {
 	return m, p.Err()
 }
 
-//  Depth
+// Depth
 type DPT struct {
 	nmea.BaseSentence
 	Depth float64
@@ -82,7 +89,7 @@ func parseDPT(s nmea.BaseSentence) (nmea.Sentence, error) {
 	return m, p.Err()
 }
 
-//  Wind speed and angle
+// Wind speed and angle
 type MWV struct {
 	nmea.BaseSentence
 	Angle     float64
@@ -109,7 +116,7 @@ func parseMWV(s nmea.BaseSentence) (nmea.Sentence, error) {
 	return m, p.Err()
 }
 
-//  Distance through water
+// Distance through water
 type VLW struct {
 	nmea.BaseSentence
 	TotalDistanceNauticalMiles      float64
@@ -175,4 +182,49 @@ func parseXDR(s nmea.BaseSentence) (nmea.Sentence, error) {
 	}
 
 	return m, p.Err()
+}
+
+type DIN struct {
+	nmea.BaseSentence
+	PGN       string
+	Timestamp int
+	Source    int
+	Data      []byte
+}
+
+func (d DIN) BatteryVoltage() float64 {
+	if d.PGN == "01F214" {
+		v := binary.LittleEndian.Uint16(d.Data[1:])
+		return float64(v) / 100
+	}
+	return 0
+}
+
+func parseDIN(s nmea.BaseSentence) (nmea.Sentence, error) {
+	p := nmea.NewParser(s)
+	p.AssertType(TypeDIN)
+	m := DIN{
+		BaseSentence: s,
+		PGN:          p.String(0, "PGN"),
+		Timestamp:    hexInt(p.String(1, "timestamp")),
+		Source:       hexInt(p.String(2, "source")),
+		Data:         hexBytes(p.String(3, "data")),
+	}
+	return m, p.Err()
+}
+
+func hexInt(s string) int {
+	i, err := strconv.ParseInt(s, 16, 64)
+	if err != nil {
+		return 0
+	}
+	return int(i)
+}
+
+func hexBytes(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return nil
+	}
+	return b
 }

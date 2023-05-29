@@ -66,10 +66,10 @@ var (
 		Subsystem: "instruments",
 		Name:      "water_speed_kn",
 	}))
-	voltage = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
+	batteryVoltage = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
-		Subsystem: "ais",
-		Name:      "supply_voltage",
+		Subsystem: "instruments",
+		Name:      "battery_voltage",
 	}))
 	airTemp = newLiveGauge(prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "nmea",
@@ -195,13 +195,6 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 					positionTimeout.Reset(instrumentRetention)
 				}
 
-			case TypeSMT:
-				smt := sent.(SMT)
-				voltage.Set(smt.SupplyVoltage)
-				l.extMut.Lock()
-				l.exts.Set("supplyvoltage", fmt.Sprintf("%.01f", smt.SupplyVoltage))
-				l.extMut.Unlock()
-
 			case TypeXDR:
 				xdr := sent.(XDR)
 				for _, m := range xdr.Measurements {
@@ -223,6 +216,14 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 						l.extMut.Unlock()
 					}
 				}
+
+			case TypeDIN:
+				din := sent.(DIN)
+				v := din.BatteryVoltage()
+				batteryVoltage.Set(v)
+				l.extMut.Lock()
+				l.exts.Set("batteryvoltage", fmt.Sprintf("%.01f", v))
+				l.extMut.Unlock()
 			}
 
 		case <-positionTimeout.C:

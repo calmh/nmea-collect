@@ -31,3 +31,14 @@ func TestParseXDR(t *testing.T) {
 		t.Error("bad temperature 2", xdr.Measurements[2].Value)
 	}
 }
+
+func TestParseDIN(t *testing.T) {
+	sent, err := nmea.Parse(`$PCDIN,01F214,47B319FE,55,00C8040000FFFFC4*51`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	din := sent.(DIN)
+	if din.BatteryVoltage() != 12.24 {
+		t.Error("bad battery voltage", din.BatteryVoltage())
+	}
+}
