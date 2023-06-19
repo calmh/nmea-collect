@@ -76,7 +76,7 @@ func readTCPInto(c chan<- string, addr string) *lineWriter {
 }
 
 func tcpReader(addr string) (io.ReadCloser, error) {
-	conn, err := net.Dial("tcp", addr)
+	conn, err := net.DialTimeout("tcp", addr, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("reader: %w", err)
 	}
