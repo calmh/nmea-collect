@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	nmea "github.com/adrianmo/go-nmea"
 	"github.com/prometheus/client_golang/prometheus"
@@ -67,9 +68,10 @@ var (
 
 func readTCPInto(c chan<- string, addr string) *lineWriter {
 	return &lineWriter{
-		reader: func() (io.ReadCloser, error) { return tcpReader(addr) },
-		name:   fmt.Sprintf("tcp/%s", addr),
-		lines:  c,
+		reader:      func() (io.ReadCloser, error) { return tcpReader(addr) },
+		name:        fmt.Sprintf("tcp/%s", addr),
+		lines:       c,
+		readTimeout: 15 * time.Second,
 	}
 }
 
@@ -111,9 +113,10 @@ func httpReader(port int) (io.ReadCloser, error) {
 
 func readUDPInto(c chan<- string, port int) *lineWriter {
 	return &lineWriter{
-		reader: func() (io.ReadCloser, error) { return udpReader(port) },
-		name:   fmt.Sprintf("udp/%d", port),
-		lines:  c,
+		reader:      func() (io.ReadCloser, error) { return udpReader(port) },
+		name:        fmt.Sprintf("udp/%d", port),
+		lines:       c,
+		readTimeout: 15 * time.Second,
 	}
 }
 
@@ -135,9 +138,10 @@ func readSerialInto(c chan<- string, dev string) *lineWriter {
 }
 
 type lineWriter struct {
-	reader func() (io.ReadCloser, error)
-	name   string
-	lines  chan<- string
+	reader      func() (io.ReadCloser, error)
+	name        string
+	lines       chan<- string
+	readTimeout time.Duration
 }
 
 func (r *lineWriter) String() string {
@@ -160,11 +164,19 @@ func (r *lineWriter) Serve(ctx context.Context) error {
 	nmeaMessagesNoChecksum.WithLabelValues(r.name)
 	nmeaMessagesNonNMEA.WithLabelValues(r.name)
 
+	if err := r.trySetDeadline(reader); err != nil {
+		return err
+	}
+
 	for sc.Scan() {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+
+		if err := r.trySetDeadline(reader); err != nil {
+			return err
 		}
 
 		line := sc.Text()
@@ -199,6 +211,19 @@ func (r *lineWriter) Serve(ctx context.Context) error {
 		return err
 	}
 	return io.EOF
+}
+
+func (r *lineWriter) trySetDeadline(v any) error {
+	if r.readTimeout == 0 {
+		return nil
+	}
+	type deadliner interface {
+		SetReadDeadline(t time.Time) error
+	}
+	if rd, ok := v.(deadliner); ok {
+		return rd.SetReadDeadline(time.Now().Add(r.readTimeout))
+	}
+	return nil
 }
 
 func linesInto(c chan<- string, r io.ReadCloser, name string) *lineWriter {
