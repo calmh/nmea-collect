@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"sort"
 	"strings"
 	"time"
+
+	"calmh.dev/nmea-collect/internal/geometry"
 )
 
 const (
@@ -151,9 +152,7 @@ func (g *AutoGPX) oldestNewerThanIdx(t time.Time) int {
 
 // distance between two samples, in meters
 func distance(s1, s2 sample) float64 {
-	d1 := math.Abs(s1.lat - s2.lat)
-	d2 := math.Abs(s1.lon - s2.lon)
-	return math.Sqrt(d1*d1+d2*d2) * 60 * 1852
+	return geometry.Distance(s1.lat, s1.lon, s2.lat, s2.lon) * 1852
 }
 
 type Extensions map[string]extensionValue

@@ -2,29 +2,51 @@ package geometry
 
 import (
 	"testing"
-
-	"calmh.dev/nmea-collect/internal/gpx/reader"
 )
 
-func TestCourse(t *testing.T) {
+func TestBearing(t *testing.T) {
 	cases := []struct {
-		p0, p1 reader.GPXTrkPoint
-		want   float64
+		lat1, lon1 float64
+		lat2, lon2 float64
+		want       float64
 	}{
-		{reader.GPXTrkPoint{Lat: 0, Lon: 0}, reader.GPXTrkPoint{Lat: 0, Lon: 0}, 0},
-		{reader.GPXTrkPoint{Lat: 0, Lon: 0}, reader.GPXTrkPoint{Lat: 0, Lon: 1}, 90},
-		{reader.GPXTrkPoint{Lat: 0, Lon: 0}, reader.GPXTrkPoint{Lat: 1, Lon: 0}, 0},
-		{reader.GPXTrkPoint{Lat: 0, Lon: 0}, reader.GPXTrkPoint{Lat: 1, Lon: 1}, 45},
-		{reader.GPXTrkPoint{Lat: 0, Lon: 0}, reader.GPXTrkPoint{Lat: 1, Lon: -1}, 315},
-		{reader.GPXTrkPoint{Lat: 0, Lon: 0}, reader.GPXTrkPoint{Lat: -1, Lon: 0}, 180},
-		{reader.GPXTrkPoint{Lat: 0, Lon: 0}, reader.GPXTrkPoint{Lat: -1, Lon: 1}, 135},
-		{reader.GPXTrkPoint{Lat: 0, Lon: 0}, reader.GPXTrkPoint{Lat: -1, Lon: -1}, 225},
+		{0, 0, 0, 0, 0},
+		{0, 0, 0, 1, 90},
+		{0, 0, 1, 0, 0},
+		{0, 0, 1, 1, 45},
+		{0, 0, -1, 1, 135},
+		{0, 0, -1, -1, 225},
+		{0, 0, 1, -1, 315},
+		{0, 0, 0, -1, 270},
+		{0, 0, -1, 0, 180},
 	}
 
 	for _, c := range cases {
-		got := Course(c.p0, c.p1)
+		got := Bearing(c.lat1, c.lon1, c.lat2, c.lon2)
 		if got < c.want-1 || got > c.want+1 {
-			t.Errorf("course(%v, %v) == %f, want %f", c.p0, c.p1, got, c.want)
+			t.Errorf("Course(%f, %f, %f, %f) == %f, want %f", c.lat1, c.lon1, c.lat2, c.lon2, got, c.want)
+		}
+	}
+}
+
+func TestDistance(t *testing.T) {
+	cases := []struct {
+		lat1, lon1 float64
+		lat2, lon2 float64
+		want       float64
+	}{
+		{0, 0, 0, 0, 0},
+		{0, 0, 0, 1, 60},
+		{0, 0, 1, 0, 60},
+		{0, 0, 0, -1, 60},
+		{0, 0, -1, 0, 60},
+		{80, 90, 80, 91, 10},
+	}
+
+	for _, c := range cases {
+		got := Distance(c.lat1, c.lon1, c.lat2, c.lon2)
+		if got < c.want-1 || got > c.want+1 {
+			t.Errorf("Distance(%f, %f, %f, %f) == %f, want %f", c.lat1, c.lon1, c.lat2, c.lon2, got, c.want)
 		}
 	}
 }

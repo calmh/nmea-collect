@@ -74,7 +74,8 @@ func summarize(tracks [][]reader.GPXTrkPoint) summary {
 			p = points[i]
 			if prev != nil {
 				td := p.Time.Sub(prev.Time)
-				dist := geometry.Distance(*prev, p)
+				dist := geometry.Distance(prev.Lat, prev.Lon, p.Lat, p.Lon)
+				cog := geometry.Bearing(prev.Lat, prev.Lon, p.Lat, p.Lon)
 				s.tripDistance += dist
 				s.sog.record(dist/td.Hours(), td)
 				s.windSpeed.record(p.Extensions.Named("windspeed").Value, td)
@@ -88,7 +89,7 @@ func summarize(tracks [][]reader.GPXTrkPoint) summary {
 						sog:       s.sog.avg(),
 						windSpeed: p.Extensions.Named("windspeed").Value,
 						windDir:   int(p.Extensions.Named("heading").Value+p.Extensions.Named("windangle").Value) % 360,
-						cog:       geometry.Course(*prev, p),
+						cog:       cog,
 					})
 				}
 			} else {
