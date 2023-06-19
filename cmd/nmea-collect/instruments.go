@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"calmh.dev/nmea-collect/gpx"
+	"calmh.dev/nmea-collect/internal/gpx/writer"
 	nmea "github.com/adrianmo/go-nmea"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -96,7 +96,7 @@ var (
 
 type instrumentsCollector struct {
 	c      <-chan string
-	exts   gpx.Extensions
+	exts   writer.Extensions
 	extMut sync.Mutex
 }
 
@@ -116,7 +116,7 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 	}()
 
 	l.extMut.Lock()
-	l.exts = make(gpx.Extensions)
+	l.exts = make(writer.Extensions)
 	l.extMut.Unlock()
 
 	windSpeedOverTime := measurement{period: time.Minute}
@@ -238,10 +238,10 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 	}
 }
 
-func (i *instrumentsCollector) GPXExtensions() gpx.Extensions {
+func (i *instrumentsCollector) GPXExtensions() writer.Extensions {
 	i.extMut.Lock()
 	defer i.extMut.Unlock()
-	copy := make(gpx.Extensions, len(i.exts))
+	copy := make(writer.Extensions, len(i.exts))
 	for k, v := range i.exts {
 		copy[k] = v
 	}

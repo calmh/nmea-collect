@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"calmh.dev/nmea-collect/gpx"
+	"calmh.dev/nmea-collect/internal/gpx/writer"
 	nmea "github.com/adrianmo/go-nmea"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -42,11 +42,11 @@ var (
 
 type gpxCollector struct {
 	c <-chan string
-	w *gpx.AutoGPX
+	w *writer.AutoGPX
 	i *instrumentsCollector
 }
 
-func collectGPX(c <-chan string, w *gpx.AutoGPX, i *instrumentsCollector) *gpxCollector {
+func collectGPX(c <-chan string, w *writer.AutoGPX, i *instrumentsCollector) *gpxCollector {
 	return &gpxCollector{
 		c: c,
 		w: w,

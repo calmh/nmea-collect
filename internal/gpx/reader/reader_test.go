@@ -1,4 +1,4 @@
-package main
+package reader
 
 import (
 	"os"
@@ -10,7 +10,7 @@ func TestParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	points, err := points(fd)
+	points, err := Points(fd)
 	if err != nil {
 		t.Fatal(err)
 	}

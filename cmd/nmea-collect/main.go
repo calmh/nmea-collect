@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"calmh.dev/nmea-collect/gpx"
+	"calmh.dev/nmea-collect/internal/gpx/writer"
 	nmea "github.com/adrianmo/go-nmea"
 	"github.com/alecthomas/kong"
 	"github.com/prometheus/client_golang/prometheus"
@@ -135,7 +135,7 @@ func main() {
 	}
 
 	if cli.OutputGPXPattern != "" {
-		gpx := &gpx.AutoGPX{
+		gpx := &writer.AutoGPX{
 			Opener: func(t time.Time) (io.WriteCloser, error) {
 				return newGPXFile(cli.OutputGPXPattern, t)
 			},
