@@ -1,4 +1,4 @@
-all:	test bin nmea-collect nmea-collect-linux-arm summarize-gpx udp-proxy-linux-mips
+all:	test bin nmea-collect nmea-collect-linux-arm64 summarize-gpx udp-proxy-linux-mips
 
 .PHONY: test
 test:
@@ -11,9 +11,9 @@ bin:
 nmea-collect:
 	@go build -v -o bin/nmea-collect ./cmd/nmea-collect
 
-.PHONY: nmea-collect-linux-arm
-nmea-collect-linux-arm:
-	@GOOS=linux GOARCH=arm go build -v -o bin/nmea-collect-linux-arm ./cmd/nmea-collect
+.PHONY: nmea-collect-linux-arm64
+nmea-collect-linux-arm64:
+	@GOOS=linux GOARCH=arm64 go build -v -o bin/nmea-collect-linux-arm64 ./cmd/nmea-collect
 
 .PHONY: summarize-gpx
 summarize-gpx:
