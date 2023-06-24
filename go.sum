@@ -1,8 +1,8 @@
 github.com/BertoldVdb/go-ais v0.1.0 h1:lGUG2W62OHE5+CbjNHsaLj3FHDpn6Iy0FU9qC9tQS2o=
 github.com/BertoldVdb/go-ais v0.1.0/go.mod h1:V2+fRhMf6AWOIEGEjgGAImHm+D/gCe6iGTUHvDEZf3U=
 github.com/adrianmo/go-nmea v1.3.0/go.mod h1:u8bPnpKt/D/5rll/5l9f6iDfeq5WZW0+/SXdkwix6Tg=
-github.com/adrianmo/go-nmea v1.8.0 h1:KE6xDTMQNoKoyCb7IQRXGOIbn4WJlUKwIuRD4LbpKlM=
-github.com/adrianmo/go-nmea v1.8.0/go.mod h1:u8bPnpKt/D/5rll/5l9f6iDfeq5WZW0+/SXdkwix6Tg=
+github.com/adrianmo/go-nmea v1.4.0 h1:EiT6whGkIvp9QHj9Y68wIIf1FrpBDqF3Qmzubnn2e3Q=
+github.com/adrianmo/go-nmea v1.4.0/go.mod h1:u8bPnpKt/D/5rll/5l9f6iDfeq5WZW0+/SXdkwix6Tg=
 github.com/alecthomas/assert/v2 v2.1.0 h1:tbredtNcQnoSd3QBhQWI7QZ3XHOVkw1Moklp2ojoH/0=
 github.com/alecthomas/kong v0.7.1 h1:azoTh0IOfwlAX3qN9sHWTxACE2oV8Bg2gAwBsMwDQY4=
 github.com/alecthomas/kong v0.7.1/go.mod h1:n1iCIO2xS46oE8ZfYCNDqdR0b0wZNrXAIAqro/2132U=

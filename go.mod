@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/BertoldVdb/go-ais v0.1.0
-	github.com/adrianmo/go-nmea v1.8.0
+	github.com/adrianmo/go-nmea v1.4.0
 	github.com/alecthomas/kong v0.7.1
 	github.com/prometheus/client_golang v1.16.0
 	github.com/thejerf/suture/v4 v4.0.2
