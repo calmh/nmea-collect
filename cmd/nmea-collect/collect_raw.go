@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/adrianmo/go-nmea"
@@ -79,6 +80,7 @@ func (r *rawCollector) Serve(ctx context.Context) error {
 				}
 				name := truncS.Format(r.filePat)
 				log.Println("Creating raw file", name)
+				_ = os.MkdirAll(filepath.Dir(name), 0o755)
 				nfd, err := os.Create(name)
 				if err != nil {
 					return err

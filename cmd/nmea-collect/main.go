@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -164,5 +165,6 @@ func newGPXFile(pattern string, t time.Time) (io.WriteCloser, error) {
 	name := t.UTC().Format(pattern)
 	log.Println("Creating new GPX track", name)
 	gpxFilesCreatedTotal.Inc()
+	_ = os.MkdirAll(filepath.Dir(name), 0o755)
 	return os.Create(name)
 }
