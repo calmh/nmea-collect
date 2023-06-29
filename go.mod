@@ -8,6 +8,7 @@ require (
 	github.com/alecthomas/kong v0.7.1
 	github.com/prometheus/client_golang v1.16.0
 	github.com/thejerf/suture/v4 v4.0.2
+	golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df
 )
 
 replace github.com/adrianmo/go-nmea => github.com/calmh/go-nmea v1.8.1-0.20230624051950-2e4c023fe89a
