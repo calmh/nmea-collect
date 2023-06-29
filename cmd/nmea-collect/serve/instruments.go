@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 	"sync"
@@ -259,7 +260,18 @@ func (l *prometheusListener) String() string {
 func (l *prometheusListener) Serve(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.Handle("/", promhttp.Handler())
-	return http.ListenAndServe(l.addr, mux)
+
+	list, err := net.Listen("tcp", l.addr)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		<-ctx.Done()
+		list.Close()
+	}()
+
+	return http.Serve(list, mux)
 }
 
 type measurement struct {

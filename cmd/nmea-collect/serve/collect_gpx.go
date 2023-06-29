@@ -97,6 +97,7 @@ func (c *gpxCollector) Serve(ctx context.Context) error {
 			c.w.Flush()
 
 		case <-ctx.Done():
+			c.w.Flush()
 			return ctx.Err()
 		}
 	}

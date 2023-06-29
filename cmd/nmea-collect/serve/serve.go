@@ -50,7 +50,7 @@ type CLI struct {
 	PrometheusMetricsListen string `default:"127.0.0.1:9140" help:"HTTP listen address for Prometheus metrics endpoint" placeholder:"ADDR" group:"Metrics"`
 }
 
-func (cli *CLI) Run() error {
+func (cli *CLI) Run(ctx context.Context) error {
 	for key, parser := range parsers {
 		_ = nmea.RegisterParser(key, parser)
 	}
@@ -149,7 +149,7 @@ func (cli *CLI) Run() error {
 		sup.Add(collectGPX(nonAIS.Output(), gpx, instruments))
 	}
 
-	return sup.Serve(context.Background())
+	return sup.Serve(ctx)
 }
 
 var gpxFilesCreatedTotal = promauto.NewCounter(prometheus.CounterOpts{

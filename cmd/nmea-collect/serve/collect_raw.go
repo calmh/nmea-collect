@@ -114,6 +114,9 @@ func (r *rawCollector) Serve(ctx context.Context) error {
 			}
 
 		case <-ctx.Done():
+			if fd != nil {
+				fd.Flush()
+			}
 			return ctx.Err()
 		}
 	}

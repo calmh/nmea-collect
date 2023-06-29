@@ -105,6 +105,11 @@ func (t *tcpListener) Serve(ctx context.Context) error {
 	}
 	defer l.Close()
 
+	go func() {
+		<-ctx.Done()
+		_ = l.Close()
+	}()
+
 	tcpIncomingConnections.WithLabelValues(t.addr)
 
 	for {
