@@ -1,19 +1,20 @@
 # nmea-collect
 
-A small tool to collect NMEA track logs.
+A small tool to collect NMEA raw data and track logs.
 
 ```
-Usage: nmea-collect
+Usage: nmea-collect serve
+
+Process incoming NMEA data
 
 Flags:
-  -h, --help                    Show context-sensitive help.
-      --input-serial-voltage    Read supply voltage from serial connected SRT
-                                AIS
+  -h, --help    Show context-sensitive help.
 
 Input
   --input-tcp-connect=ADDR,...    TCP connect input addresses (e.g.,
                                   172.16.1.2:2000)
   --input-udp-listen=PORT,...     UDP broadcast input listen ports (e.g., 2000)
+  --input-http-listen=PORT,...    HTTP input listen ports (e.g., 8080)
   --input-serial=DEV,...          Serial port inputs (e.g., /dev/ttyS0)
   --input-stdin                   Read NMEA from standard input
 
@@ -30,10 +31,8 @@ UDP output
                                 Maximum UDP buffer delay (AIS only)
 
 TCP output
-  --forward-all-tcp-listen=":2000"
-      TCP listen address (all NMEA)
-  --forward-ais-tcp-listen=":2010"
-      TCP listen address (AIS only)
+  --forward-all-tcp-listen=ADDR    TCP listen address (all NMEA)
+  --forward-ais-tcp-listen=ADDR    TCP listen address (AIS only)
 
 GPX File Output
   --output-gpx-pattern="track-20060102-150405.gpx"
@@ -41,7 +40,7 @@ GPX File Output
   --output-gpx-sample-interval=10s
       Time between track points
   --output-gpx-moving-distance=25
-      Minimum travel in time window to consider us moving (m)
+      Minimum travel in time window to consider us moving (meters)
   --output-gpx-start-time-window=1m
       Movement time window for starting track
   --output-gpx-stop-time-window=5m
@@ -55,8 +54,10 @@ Raw NMEA File Output
                                   Write buffer for output file
   --output-raw-uncompressed       Write uncompressed NMEA (default is gzipped)
   --output-raw-time-window=24h    How often to create a new raw file
+  --output-raw-flush-interval=5m
+                                  How often to flush raw data to disk
 
 Metrics
-  --prometheus-metrics-listen="127.0.0.1:9140"
+  --prometheus-metrics-listen=ADDR
       HTTP listen address for Prometheus metrics endpoint
 ```

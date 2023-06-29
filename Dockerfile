@@ -11,5 +11,5 @@ EXPOSE 2000/tcp 2000/udp 9140/tcp
 
 COPY --from=builder /src/nmea-collect /bin/nmea-collect
 
-ENTRYPOINT ["/bin/nmea-collect", "--input-udp-listen=2000"]
+ENTRYPOINT ["/bin/nmea-collect", "serve", "--input-udp-listen=2000"]
 

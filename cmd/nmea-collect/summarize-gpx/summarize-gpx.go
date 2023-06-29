@@ -1,4 +1,4 @@
-package main
+package summarize
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 	"github.com/alecthomas/kong"
 )
 
-var cli struct {
+type CLI struct {
 	Files             []string `arg:""`
 	DeleteShorterThan float64  `placeholder:"DIST"`
 	DeleteErrored     bool
@@ -20,7 +20,7 @@ var cli struct {
 
 const waypointInterval = time.Hour
 
-func main() {
+func (cli *CLI) Run() error {
 	kong.Parse(&cli)
 
 	for _, f := range cli.Files {
@@ -51,6 +51,8 @@ func main() {
 		printSummary(os.Stdout, sum)
 		fmt.Printf("\n")
 	}
+
+	return nil
 }
 
 func summarize(tracks [][]reader.GPXTrkPoint) summary {

@@ -1,4 +1,4 @@
-package main
+package serve
 
 import (
 	"context"
@@ -13,13 +13,11 @@ import (
 
 const contactRetention = 5 * time.Minute
 
-var (
-	aisContacts = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: "nmea",
-		Subsystem: "ais",
-		Name:      "contacts_5min",
-	}, []string{"class"})
-)
+var aisContacts = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: "nmea",
+	Subsystem: "ais",
+	Name:      "contacts_5min",
+}, []string{"class"})
 
 type aisContactsCounter struct {
 	c         <-chan string

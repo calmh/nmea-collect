@@ -1,4 +1,4 @@
-package main
+package consolidate
 
 import (
 	"compress/gzip"
@@ -9,19 +9,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/alecthomas/kong"
 	"golang.org/x/exp/slices"
 )
 
-var cli struct {
-	Path string `arg:"" default:"/data/archive/nmea"`
+type CLI struct {
+	Path string `arg:"" required:""`
 	From string `default:"nmea-raw.20060102-150405.gz"`
 	To   string `default:"nmea-raw.200601.gz"`
 }
 
-func main() {
-	kong.Parse(&cli)
-
+func (cli *CLI) Run() error {
 	entries, err := os.ReadDir(cli.Path)
 	if err != nil {
 		log.Fatal(err)
@@ -99,4 +96,6 @@ func main() {
 	for _, f := range toDelete {
 		os.Remove(filepath.Join(cli.Path, f))
 	}
+
+	return nil
 }
