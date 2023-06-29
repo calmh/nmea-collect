@@ -30,20 +30,22 @@ var (
 )
 
 type rawCollector struct {
-	filePat  string
-	bufSize  int
-	window   time.Duration
-	compress bool
-	c        <-chan string
+	filePat       string
+	bufSize       int
+	window        time.Duration
+	flushInterval time.Duration
+	compress      bool
+	c             <-chan string
 }
 
-func collectRAW(filePat string, bufSize int, window time.Duration, compress bool, c <-chan string) *rawCollector {
+func collectRAW(filePat string, bufSize int, window, flushInterval time.Duration, compress bool, c <-chan string) *rawCollector {
 	return &rawCollector{
-		filePat:  filePat,
-		bufSize:  bufSize,
-		window:   window,
-		compress: compress,
-		c:        c,
+		filePat:       filePat,
+		bufSize:       bufSize,
+		window:        window,
+		flushInterval: flushInterval,
+		compress:      compress,
+		c:             c,
 	}
 }
 
@@ -62,7 +64,7 @@ func (r *rawCollector) Serve(ctx context.Context) error {
 		}
 	}()
 
-	flusher := time.NewTicker(5 * time.Minute)
+	flusher := time.NewTicker(r.flushInterval)
 	defer flusher.Stop()
 
 	var lastZDA time.Time

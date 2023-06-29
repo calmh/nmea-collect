@@ -39,14 +39,15 @@ func main() {
 
 		OutputGPXPattern         string        `default:"track-20060102-150405.gpx" help:"File naming pattern, see https://golang.org/pkg/time/#Time.Format" group:"GPX File Output"`
 		OutputGPXSampleInterval  time.Duration `help:"Time between track points" default:"10s" group:"GPX File Output"`
-		OutputGPXMovingDistance  float64       `help:"Minimum travel in time window to consider us moving (m)" default:"25" group:"GPX File Output"`
+		OutputGPXMovingDistance  float64       `help:"Minimum travel in time window to consider us moving (meters)" default:"25" group:"GPX File Output"`
 		OutputGPXStartTimeWindow time.Duration `help:"Movement time window for starting track" default:"1m" group:"GPX File Output"`
 		OutputGPXStopTimeWindow  time.Duration `help:"Movement time window before ending track" default:"5m" group:"GPX File Output"`
 
-		OutputRawPattern      string        `default:"nmea-raw.20060102-150405.gz" help:"File naming pattern, see https://golang.org/pkg/time/#Time.Format" group:"Raw NMEA File Output"`
-		OutputRawBufferSize   int           `default:"131072" help:"Write buffer for output file" group:"Raw NMEA File Output"`
-		OutputRawUncompressed bool          `help:"Write uncompressed NMEA (default is gzipped)" group:"Raw NMEA File Output"`
-		OutputRawTimeWindow   time.Duration `default:"24h" help:"How often to create a new raw file" placeholder:"DURATION" group:"Raw NMEA File Output"`
+		OutputRawPattern       string        `default:"nmea-raw.20060102-150405.gz" help:"File naming pattern, see https://golang.org/pkg/time/#Time.Format" group:"Raw NMEA File Output"`
+		OutputRawBufferSize    int           `default:"131072" help:"Write buffer for output file" group:"Raw NMEA File Output"`
+		OutputRawUncompressed  bool          `help:"Write uncompressed NMEA (default is gzipped)" group:"Raw NMEA File Output"`
+		OutputRawTimeWindow    time.Duration `default:"24h" help:"How often to create a new raw file" group:"Raw NMEA File Output"`
+		OutputRawFlushInterval time.Duration `default:"5m" help:"How often to flush raw data to disk" group:"Raw NMEA File Output"`
 
 		PrometheusMetricsListen string `default:"127.0.0.1:9140" help:"HTTP listen address for Prometheus metrics endpoint" placeholder:"ADDR" group:"Metrics"`
 	}
@@ -132,7 +133,7 @@ func main() {
 
 	if cli.OutputRawPattern != "" {
 		log.Println("Writing raw files to files named like", cli.OutputRawPattern)
-		sup.Add(collectRAW(cli.OutputRawPattern, cli.OutputRawBufferSize, cli.OutputRawTimeWindow, !cli.OutputRawUncompressed, tee.Output()))
+		sup.Add(collectRAW(cli.OutputRawPattern, cli.OutputRawBufferSize, cli.OutputRawTimeWindow, cli.OutputRawFlushInterval, !cli.OutputRawUncompressed, tee.Output()))
 	}
 
 	if cli.OutputGPXPattern != "" {
