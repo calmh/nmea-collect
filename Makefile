@@ -11,4 +11,4 @@ bin:
 
 .PHONY: nmea-collect-linux-arm64
 nmea-collect-linux-arm64:
-	@GOOS=linux GOARCH=arm64 go build -v -o bin/nmea-collect-linux-arm64 ./cmd/nmea-collect
+	@GOOS=linux GOARCH=arm64 go build -v -ldflags '-w -s' -o bin/nmea-collect-linux-arm64 ./cmd/nmea-collect
