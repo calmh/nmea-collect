@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"calmh.dev/nmea-collect/internal/gpx/writer"
-	nmea "github.com/adrianmo/go-nmea"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/thejerf/suture/v4"
@@ -51,10 +50,6 @@ type CLI struct {
 }
 
 func (cli *CLI) Run(ctx context.Context) error {
-	for key, parser := range parsers {
-		_ = nmea.RegisterParser(key, parser)
-	}
-
 	sup := suture.NewSimple("main")
 	input := make(chan string, 4096)
 	tee := NewTee("main", input)

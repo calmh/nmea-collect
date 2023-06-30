@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/http"
@@ -131,50 +132,50 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 			}
 
 			switch sent.DataType() {
-			case TypeDPT:
-				dpt := sent.(DPT)
+			case nmea.TypeDPT:
+				dpt := sent.(nmea.DPT)
 				waterDepth.Set(dpt.Depth)
 				l.extMut.Lock()
 				l.exts.Set("waterdepth", fmt.Sprintf("%.01f", dpt.Depth))
 				l.extMut.Unlock()
 
-			case TypeHDG:
-				hdg := sent.(HDG)
+			case nmea.TypeHDG:
+				hdg := sent.(nmea.HDG)
 				heading.Set(hdg.Heading)
 				l.extMut.Lock()
 				l.exts.Set("heading", fmt.Sprintf("%.0f", hdg.Heading))
 				l.extMut.Unlock()
 
-			case TypeMTW:
-				mtw := sent.(MTW)
+			case nmea.TypeMTW:
+				mtw := sent.(nmea.MTW)
 				waterTemp.Set(mtw.Temperature)
 				l.extMut.Lock()
 				l.exts.Set("watertemp", fmt.Sprintf("%.01f", mtw.Temperature))
 				l.extMut.Unlock()
 
-			case TypeMWV:
-				mwv := sent.(MWV)
-				if mwv.Reference == "R" && mwv.Status == "A" {
-					windAngle.Set(mwv.Angle)
-					windSpeed.Set(mwv.Speed)
+			case nmea.TypeMWV:
+				mwv := sent.(nmea.MWV)
+				if mwv.Reference == "R" && mwv.StatusValid {
+					windAngle.Set(mwv.WindAngle)
+					windSpeed.Set(mwv.WindSpeed)
 
-					windSpeedOverTime.Observe(mwv.Speed)
+					windSpeedOverTime.Observe(mwv.WindSpeed)
 					min, med, max := windSpeedOverTime.MinMedianMax()
 					windSpeedMin.Set(min)
 					windSpeedMed.Set(med)
 					windSpeedMax.Set(max)
 
 					l.extMut.Lock()
-					l.exts.Set("windangle", fmt.Sprintf("%.0f", mwv.Angle))
-					l.exts.Set("windspeed", fmt.Sprintf("%.01f", mwv.Speed))
+					l.exts.Set("windangle", fmt.Sprintf("%.0f", mwv.WindAngle))
+					l.exts.Set("windspeed", fmt.Sprintf("%.01f", mwv.WindSpeed))
 					l.extMut.Unlock()
 				}
 
-			case TypeVLW:
-				mwv := sent.(VLW)
-				logDistance.Set(mwv.TotalDistanceNauticalMiles)
+			case nmea.TypeVLW:
+				mwv := sent.(nmea.VLW)
+				logDistance.Set(mwv.TotalInWater)
 				l.extMut.Lock()
-				l.exts.Set("log", fmt.Sprintf("%.1f", mwv.TotalDistanceNauticalMiles))
+				l.exts.Set("log", fmt.Sprintf("%.1f", mwv.TotalInWater))
 				l.extMut.Unlock()
 
 			case nmea.TypeVHW:
@@ -196,20 +197,20 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 					positionTimeout.Reset(instrumentRetention)
 				}
 
-			case TypeXDR:
-				xdr := sent.(XDR)
+			case nmea.TypeXDR:
+				xdr := sent.(nmea.XDR)
 				for _, m := range xdr.Measurements {
-					if m.TransducerType == "C" && m.Name == "Air" {
+					if m.TransducerType == "C" && m.TransducerName == "Air" {
 						airTemp.Set(m.Value)
 						l.extMut.Lock()
 						l.exts.Set("airtemperature", fmt.Sprintf("%.01f", m.Value))
 						l.extMut.Unlock()
-					} else if m.TransducerType == "C" && m.Name == "ENV_INSIDE_T" {
+					} else if m.TransducerType == "C" && m.TransducerName == "ENV_INSIDE_T" {
 						insideTemp.Set(m.Value)
 						l.extMut.Lock()
 						l.exts.Set("insidetemperature", fmt.Sprintf("%.01f", m.Value))
 						l.extMut.Unlock()
-					} else if m.TransducerType == "P" && m.Name == "Baro" {
+					} else if m.TransducerType == "P" && m.TransducerName == "Baro" {
 						m.Value /= 100.0
 						baroPressure.Set(m.Value)
 						l.extMut.Lock()
@@ -218,13 +219,15 @@ func (l *instrumentsCollector) Serve(ctx context.Context) error {
 					}
 				}
 
-			case TypeDIN:
-				din := sent.(DIN)
-				v := din.BatteryVoltage()
-				batteryVoltage.Set(v)
-				l.extMut.Lock()
-				l.exts.Set("batteryvoltage", fmt.Sprintf("%.01f", v))
-				l.extMut.Unlock()
+			case nmea.TypePCDIN:
+				din := sent.(nmea.PCDIN)
+				v := pcdinBatteryVoltage(din)
+				if v > 0 {
+					batteryVoltage.Set(v)
+					l.extMut.Lock()
+					l.exts.Set("batteryvoltage", fmt.Sprintf("%.01f", v))
+					l.extMut.Unlock()
+				}
 			}
 
 		case <-positionTimeout.C:
@@ -339,4 +342,12 @@ func (g *liveGauge) Set(v float64) {
 	} else {
 		g.unregister.Reset(gaugeLifeTime)
 	}
+}
+
+func pcdinBatteryVoltage(d nmea.PCDIN) float64 {
+	if d.PGN == 0x1F214 {
+		v := binary.LittleEndian.Uint16(d.Data[1:])
+		return float64(v) / 100
+	}
+	return 0
 }

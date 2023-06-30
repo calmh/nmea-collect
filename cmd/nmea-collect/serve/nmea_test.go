@@ -6,18 +6,12 @@ import (
 	nmea "github.com/adrianmo/go-nmea"
 )
 
-func init() {
-	for key, parser := range parsers {
-		_ = nmea.RegisterParser(key, parser)
-	}
-}
-
 func TestParseXDR(t *testing.T) {
 	sent, err := nmea.Parse(`$YDXDR,C,4.4,C,Air,P,98950,P,Baro,C,5.4,C,ENV_INSIDE_T*1E`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	xdr := sent.(XDR)
+	xdr := sent.(nmea.XDR)
 	if len(xdr.Measurements) != 3 {
 		t.Fatal("expected 3 measurements")
 	}
@@ -37,8 +31,8 @@ func TestParseDIN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	din := sent.(DIN)
-	if din.BatteryVoltage() != 12.24 {
-		t.Error("bad battery voltage", din.BatteryVoltage())
+	din := sent.(nmea.PCDIN)
+	if v := pcdinBatteryVoltage(din); v != 12.24 {
+		t.Error("bad battery voltage", v)
 	}
 }
