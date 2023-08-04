@@ -3,13 +3,14 @@ package consolidate
 import (
 	"compress/gzip"
 	"errors"
+	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
 
 	"golang.org/x/exp/slices"
+	"golang.org/x/exp/slog"
 )
 
 type CLI struct {
@@ -21,7 +22,7 @@ type CLI struct {
 func (cli *CLI) Run() error {
 	entries, err := os.ReadDir(cli.Path)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	slices.SortFunc(entries, func(a, b os.DirEntry) bool {
 		return a.Name() < b.Name()
@@ -44,12 +45,12 @@ func (cli *CLI) Run() error {
 
 		fd, err := os.Open(filepath.Join(cli.Path, e.Name()))
 		if err != nil {
-			log.Printf("%s: %v", e.Name(), err)
+			slog.Error("Reading infile", "from", e.Name(), "error", err)
 			continue
 		}
 		gr, err := gzip.NewReader(fd)
 		if err != nil {
-			log.Printf("%s: %v", e.Name(), err)
+			slog.Error("Reading infile", "from", e.Name(), "error", err)
 			fd.Close()
 			continue
 		}
@@ -67,25 +68,25 @@ func (cli *CLI) Run() error {
 			}
 			curW, err = os.Create(filepath.Join(cli.Path, outFile))
 			if err != nil {
-				log.Fatalln("create outfile:", err)
+				return fmt.Errorf("create outfile: %w", err)
 			}
 			curGw = gzip.NewWriter(curW)
 			curOutfile = outFile
 		}
 
-		log.Println(e.Name(), "->", outFile)
+		slog.Info("Consolidate", "from", e.Name(), "to", outFile)
 		for {
 			n, err := gr.Read(buf)
 			if n > 0 {
 				if _, err := curGw.Write(buf[:n]); err != nil {
-					log.Fatalf("%s: %v", outFile, err)
+					return fmt.Errorf("%s: %w", outFile, err)
 				}
 			}
 			if errors.Is(err, io.EOF) {
 				break
 			}
 			if err != nil {
-				log.Printf("%s: %v", e.Name(), err)
+				slog.Error("Consolidate", "from", e.Name(), "to", outFile, "error", err)
 				break
 			}
 		}

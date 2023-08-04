@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/adrianmo/go-nmea"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"golang.org/x/exp/slog"
 )
 
 var (
@@ -81,7 +81,7 @@ func (r *rawCollector) Serve(ctx context.Context) error {
 					fd.Close()
 				}
 				name := truncS.Format(r.filePat)
-				log.Println("Creating raw file", name)
+				slog.Info("Creating raw file", "name", name)
 				_ = os.MkdirAll(filepath.Dir(name), 0o755)
 				nfd, err := os.Create(name)
 				if err != nil {

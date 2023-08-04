@@ -3,12 +3,12 @@ package writer
 import (
 	"fmt"
 	"io"
-	"log"
 	"sort"
 	"strings"
 	"time"
 
 	"calmh.dev/nmea-collect/internal/geometry"
+	"golang.org/x/exp/slog"
 )
 
 const (
@@ -98,19 +98,19 @@ func (g *AutoGPX) Flush() error {
 func (g *AutoGPX) startRecording(t time.Time) {
 	fd, err := g.Opener(t)
 	if err != nil {
-		log.Println("Opening file:", err)
+		slog.Error("Opening file", "error", err)
 		return
 	}
 	g.destination = fd
 
 	header := fmt.Sprintf(`<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:%s="%s"><trk><trkseg>`, Namespace, NamespaceURL)
 	if _, err := fmt.Fprintln(g.destination, header); err != nil {
-		log.Println("Writing to file:", err)
+		slog.Error("Writing to file", "error", err)
 		return
 	}
 	for _, s := range g.samples {
 		if _, err := fmt.Fprintln(g.destination, s.gpx()); err != nil {
-			log.Println("Writing to file:", err)
+			slog.Error("Writing to file", "error", err)
 			return
 		}
 	}
@@ -118,17 +118,17 @@ func (g *AutoGPX) startRecording(t time.Time) {
 
 func (g *AutoGPX) record(s sample) {
 	if _, err := fmt.Fprintln(g.destination, s.gpx()); err != nil {
-		log.Println("Writing to file:", err)
+		slog.Error("Writing to file", "error", err)
 	}
 }
 
 func (g *AutoGPX) stopRecording() {
 	footer := `</trkseg></trk></gpx>`
 	if _, err := fmt.Fprintln(g.destination, footer); err != nil {
-		log.Println("Writing to file:", err)
+		slog.Error("Writing to file", "error", err)
 	}
 	if err := g.destination.Close(); err != nil {
-		log.Println("Closing file:", err)
+		slog.Error("Closing file", "error", err)
 	}
 	g.destination = nil
 	g.samples = nil

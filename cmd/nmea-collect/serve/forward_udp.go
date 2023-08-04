@@ -5,13 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"golang.org/x/exp/slog"
 )
 
 var (
@@ -63,7 +63,7 @@ func (f *udpForwarder) Serve(ctx context.Context) error {
 	for _, addr := range f.addrs {
 		dst, err := net.Dial("udp", addr)
 		if err != nil {
-			log.Printf("Can't forward to %s: %v", addr, err)
+			slog.Error("Can't forward", "to", addr, "error", err)
 			continue
 		}
 		defer dst.Close()

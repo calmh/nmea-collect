@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 	"os/signal"
@@ -11,6 +12,9 @@ import (
 	"calmh.dev/nmea-collect/cmd/nmea-collect/serve"
 	"calmh.dev/nmea-collect/cmd/nmea-collect/summarize-gpx"
 	"github.com/alecthomas/kong"
+	"github.com/lmittmann/tint"
+	"github.com/mattn/go-isatty"
+	"golang.org/x/exp/slog"
 )
 
 type CLI struct {
@@ -31,10 +35,22 @@ func main() {
 		cancel()
 	}()
 
+	var handler slog.Handler
+	if isatty.IsTerminal(os.Stderr.Fd()) {
+		handler = tint.NewHandler(os.Stderr, &tint.Options{TimeFormat: "15:04:05.000"})
+	} else {
+		handler = slog.NewTextHandler(os.Stderr, nil)
+	}
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+
 	var cli CLI
 	kongCtx := kong.Parse(&cli)
 	kongCtx.BindTo(ctx, (*context.Context)(nil))
-	if err := kongCtx.Run(); err != nil {
-		log.Fatal(err)
+	kongCtx.Bind(logger)
+
+	if err := kongCtx.Run(); err != nil && !errors.Is(err, context.Canceled) {
+		slog.Error("Run", "error", err)
+		os.Exit(1)
 	}
 }

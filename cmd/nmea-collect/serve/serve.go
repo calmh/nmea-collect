@@ -3,17 +3,16 @@ package serve
 import (
 	"context"
 	"io"
-	"log"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"calmh.dev/nmea-collect/internal/gpx/writer"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/thejerf/suture/v4"
+	"golang.org/x/exp/slog"
 )
 
 type CLI struct {
@@ -49,44 +48,51 @@ type CLI struct {
 	PrometheusMetricsListen string `default:"127.0.0.1:9140" help:"HTTP listen address for Prometheus metrics endpoint" placeholder:"ADDR" group:"Metrics"`
 }
 
-func (cli *CLI) Run(ctx context.Context) error {
-	sup := suture.NewSimple("main")
+func (cli *CLI) Run(ctx context.Context, logger *slog.Logger) error {
+	logger = logger.With("module", "serve")
+
+	sup := suture.New("main", suture.Spec{
+		EventHook: func(ev suture.Event) {
+			logger.Error(ev.String())
+		},
+	})
+
 	input := make(chan string, 4096)
 	tee := NewTee("main", input)
 	sup.Add(tee)
 
 	if cli.InputStdin {
-		log.Println("Reading NMEA from stdin")
+		logger.Info("Reading NMEA from stdin")
 		sup.Add(linesInto(input, os.Stdin, "stdin"))
 	}
 
 	for _, addr := range cli.InputTCPConnect {
-		log.Println("Reading NMEA from TCP", addr)
+		logger.Info("Reading NMEA from TCP", "addr", addr)
 		sup.Add(readTCPInto(input, addr))
 	}
 
 	for _, port := range cli.InputUDPListen {
-		log.Println("Reading NMEA on UDP port", port)
+		logger.Info("Reading NMEA from UDP", "port", port)
 		sup.Add(readUDPInto(input, port))
 	}
 
 	for _, port := range cli.InputHTTPListen {
-		log.Println("Reading NMEA from HTTP POSTs on port", port)
+		logger.Info("Reading NMEA from HTTP POST", "port", port)
 		sup.Add(readHTTPInto(input, port))
 	}
 
 	for _, dev := range cli.InputSerial {
-		log.Println("Reading NMEA from serial device", dev)
+		logger.Info("Reading NMEA from serial device", "dev", dev)
 		sup.Add(readSerialInto(input, dev))
 	}
 
 	if cli.ForwardAllTCPListen != "" {
-		log.Println("Forwarding NMEA to incoming connections on", cli.ForwardAllTCPListen)
+		logger.Info("Forwarding NMEA to incoming connections", "addr", cli.ForwardAllTCPListen)
 		sup.Add(forwardTCP(tee.Output(), cli.ForwardAllTCPListen))
 	}
 
 	if len(cli.ForwardUDPAll) > 0 {
-		log.Println("Forwarding NMEA to UDP", strings.Join(cli.ForwardUDPAll, ", "))
+		logger.Info("Forwarding NMEA to UDP", "addrs", cli.ForwardUDPAll, ", ")
 		sup.Add(forwardUDP(tee.Output(), cli.ForwardUDPAll, cli.ForwardUDPAllMaxPacketSize, cli.ForwardUDPAllMaxDelay))
 	}
 
@@ -97,7 +103,7 @@ func (cli *CLI) Run(ctx context.Context) error {
 			ais = NewFilteredTee("AIS", tee.Output(), "!AI")
 			sup.Add(ais)
 		}
-		log.Println("Forwarding AIS to UDP", strings.Join(cli.ForwardUDPAIS, ", "))
+		logger.Info("Forwarding AIS to UDP", "addrs", cli.ForwardUDPAIS)
 		sup.Add(forwardUDP(ais.Output(), cli.ForwardUDPAIS, cli.ForwardUDPAISMaxPacketSize, cli.ForwardUDPAISMaxDelay))
 	}
 
@@ -106,7 +112,7 @@ func (cli *CLI) Run(ctx context.Context) error {
 			ais = NewFilteredTee("AIS", tee.Output(), "!AI")
 			sup.Add(ais)
 		}
-		log.Println("Forwarding AIS to incoming connections on", cli.ForwardAISTCPListen)
+		logger.Info("Forwarding AIS to incoming connections ", "addr", cli.ForwardAISTCPListen)
 		sup.Add(forwardTCP(ais.Output(), cli.ForwardAISTCPListen))
 	}
 
@@ -118,19 +124,19 @@ func (cli *CLI) Run(ctx context.Context) error {
 
 	if cli.PrometheusMetricsListen != "" {
 		url := &url.URL{Scheme: "http", Host: cli.PrometheusMetricsListen, Path: "/metrics"}
-		log.Println("Exporting instruments and metrics on", url)
+		logger.Info("Exporting instruments and metrics", "url", url.String())
 		sup.Add(&prometheusListener{cli.PrometheusMetricsListen})
 	}
 
 	if cli.OutputRawPattern != "" {
-		log.Println("Writing raw files to files named like", cli.OutputRawPattern)
+		logger.Info("Writing raw files", "pattern", cli.OutputRawPattern)
 		sup.Add(collectRAW(cli.OutputRawPattern, cli.OutputRawBufferSize, cli.OutputRawTimeWindow, cli.OutputRawFlushInterval, !cli.OutputRawUncompressed, tee.Output()))
 	}
 
 	if cli.OutputGPXPattern != "" {
 		gpx := &writer.AutoGPX{
 			Opener: func(t time.Time) (io.WriteCloser, error) {
-				return newGPXFile(cli.OutputGPXPattern, t)
+				return newGPXFile(*logger, cli.OutputGPXPattern, t)
 			},
 			SampleInterval:        cli.OutputGPXSampleInterval,
 			TriggerDistanceMeters: cli.OutputGPXMovingDistance,
@@ -138,7 +144,7 @@ func (cli *CLI) Run(ctx context.Context) error {
 			CooldownTimeWindow:    cli.OutputGPXStopTimeWindow,
 		}
 
-		log.Println("Collecting GPX tracks to files named like", cli.OutputGPXPattern)
+		logger.Info("Collecting GPX tracks", "pattern", cli.OutputGPXPattern)
 		nonAIS := NewFilteredTee("non-AIS", tee.Output(), "$")
 		sup.Add(nonAIS)
 		sup.Add(collectGPX(nonAIS.Output(), gpx, instruments))
@@ -153,9 +159,9 @@ var gpxFilesCreatedTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Name:      "files_created_total",
 })
 
-func newGPXFile(pattern string, t time.Time) (io.WriteCloser, error) {
+func newGPXFile(logger slog.Logger, pattern string, t time.Time) (io.WriteCloser, error) {
 	name := t.UTC().Format(pattern)
-	log.Println("Creating new GPX track", name)
+	logger.Info("Creating new GPX track", "name", name)
 	gpxFilesCreatedTotal.Inc()
 	_ = os.MkdirAll(filepath.Dir(name), 0o755)
 	return os.Create(name)
